@@ -22,39 +22,45 @@ const (
 )
 
 func init() {
-	if endpoint := os.Getenv("LOCAL_ENDPOINT"); endpoint != "" {
-		localEndpoint, err := url.Parse(endpoint)
-		if err != nil {
-			logging.Debug("Failed to parse local endpoint",
-				"error", err,
-				"endpoint", endpoint,
-			)
-			return
-		}
+	BootstrapLocalModels(os.Getenv("LOCAL_ENDPOINT"))
+}
 
-		load := func(url *url.URL, path string) []localModel {
-			url.Path = path
-			return listLocalModels(url.String())
-		}
-
-		models := load(localEndpoint, lmStudioBetaModelsPath)
-
-		if len(models) == 0 {
-			models = load(localEndpoint, localModelsPath)
-		}
-
-		if len(models) == 0 {
-			logging.Debug("No local models found",
-				"endpoint", endpoint,
-			)
-			return
-		}
-
-		loadLocalModels(models)
-
-		viper.SetDefault("providers.local.apiKey", "dummy")
-		ProviderPopularity[ProviderLocal] = 0
+func BootstrapLocalModels(endpoint string) {
+	if strings.TrimSpace(endpoint) == "" {
+		return
 	}
+
+	localEndpoint, err := url.Parse(endpoint)
+	if err != nil {
+		logging.Debug("Failed to parse local endpoint",
+			"error", err,
+			"endpoint", endpoint,
+		)
+		return
+	}
+
+	load := func(url *url.URL, path string) []localModel {
+		url.Path = path
+		return listLocalModels(url.String())
+	}
+
+	models := load(localEndpoint, lmStudioBetaModelsPath)
+
+	if len(models) == 0 {
+		models = load(localEndpoint, localModelsPath)
+	}
+
+	if len(models) == 0 {
+		logging.Debug("No local models found",
+			"endpoint", endpoint,
+		)
+		return
+	}
+
+	loadLocalModels(models)
+
+	viper.SetDefault("providers.local.apiKey", "dummy")
+	ProviderPopularity[ProviderLocal] = 0
 }
 
 type localModelList struct {
@@ -145,7 +151,7 @@ func convertLocalModel(model localModel) Model {
 		APIModel:            model.ID,
 		ContextWindow:       cmp.Or(model.LoadedContextLength, 4096),
 		DefaultMaxTokens:    cmp.Or(model.LoadedContextLength, 4096),
-		CanReason:           true,
+		CanReason:           false,
 		SupportsAttachments: true,
 	}
 }

@@ -10,8 +10,15 @@ import (
 
 type Querier interface {
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
+	CreateRAGChunk(ctx context.Context, arg CreateRAGChunkParams) (RagChunk, error)
+	CreateRAGDocument(ctx context.Context, arg CreateRAGDocumentParams) (RagDocument, error)
+	CreateRAGIngestionJob(ctx context.Context, arg CreateRAGIngestionJobParams) (RagIngestionJob, error)
+	CreateRAGRetrievalLog(ctx context.Context, arg CreateRAGRetrievalLogParams) (RagRetrievalLog, error)
+	CreateRAGRetrievalLogResult(ctx context.Context, arg CreateRAGRetrievalLogResultParams) (RagRetrievalLogResult, error)
+	CreateRAGSource(ctx context.Context, arg CreateRAGSourceParams) (RagSource, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	DeleteRAGChunksByDocument(ctx context.Context, documentID string) error
 	DeleteFile(ctx context.Context, id string) error
 	DeleteMessage(ctx context.Context, id string) error
 	DeleteSession(ctx context.Context, id string) error
@@ -19,16 +26,26 @@ type Querier interface {
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
 	GetFile(ctx context.Context, id string) (File, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
+	GetRAGDocumentBySourceExternalID(ctx context.Context, arg GetRAGDocumentBySourceExternalIDParams) (RagDocument, error)
+	GetRAGSourceByURI(ctx context.Context, uri string) (RagSource, error)
 	GetMessage(ctx context.Context, id string) (Message, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
+	ListRAGChunksByDocument(ctx context.Context, documentID string) ([]RagChunk, error)
+	ListRAGDocumentsBySource(ctx context.Context, sourceID string) ([]RagDocument, error)
+	ListRAGRetrievalLogResults(ctx context.Context, logID string) ([]RagRetrievalLogResult, error)
+	ListRAGSources(ctx context.Context) ([]RagSource, error)
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListNewFiles(ctx context.Context) ([]File, error)
 	ListSessions(ctx context.Context) ([]Session, error)
+	SearchRAGChunksLexical(ctx context.Context, arg SearchRAGChunksLexicalParams) ([]SearchRAGChunksLexicalRow, error)
 	UpdateFile(ctx context.Context, arg UpdateFileParams) (File, error)
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
+	UpdateRAGChunkEmbedding(ctx context.Context, arg UpdateRAGChunkEmbeddingParams) (RagChunk, error)
+	UpdateRAGIngestionJob(ctx context.Context, arg UpdateRAGIngestionJobParams) (RagIngestionJob, error)
+	UpdateRAGSourceIndexState(ctx context.Context, arg UpdateRAGSourceIndexStateParams) (RagSource, error)
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 }
 

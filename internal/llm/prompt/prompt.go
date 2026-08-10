@@ -27,15 +27,31 @@ func GetAgentPrompt(agentName config.AgentName, provider models.ModelProvider) s
 		basePrompt = "You are a helpful assistant"
 	}
 
+	finalPrompt := basePrompt
+
 	if agentName == config.AgentCoder || agentName == config.AgentTask {
 		// Add context from project-specific instruction files if they exist
 		contextContent := getContextFromPaths()
 		logging.Debug("Context content", "Context", contextContent)
 		if contextContent != "" {
-			return fmt.Sprintf("%s\n\n# Project-Specific Context\n Make sure to follow the instructions in the context below\n%s", basePrompt, contextContent)
+			finalPrompt = fmt.Sprintf("%s\n\n# Project-Specific Context\n Make sure to follow the instructions in the context below\n%s", finalPrompt, contextContent)
 		}
 	}
-	return basePrompt
+
+	if systemPrompt := readWorkspacePromptOverride("system.md"); systemPrompt != "" {
+		finalPrompt = fmt.Sprintf("%s\n\n# Workspace System Prompt\n%s", finalPrompt, systemPrompt)
+	}
+
+	if skillsPrompt := readWorkspacePromptOverride("skills.md"); skillsPrompt != "" {
+		finalPrompt = fmt.Sprintf("%s\n\n# Workspace Skills Prompt\n%s", finalPrompt, skillsPrompt)
+	}
+
+	agentPromptFile := filepath.Join("agents", string(agentName)+".md")
+	if agentPrompt := readWorkspacePromptOverride(agentPromptFile); agentPrompt != "" {
+		finalPrompt = fmt.Sprintf("%s\n\n# Workspace Agent Prompt (%s)\n%s", finalPrompt, agentName, agentPrompt)
+	}
+
+	return finalPrompt
 }
 
 var (
@@ -134,4 +150,24 @@ func processFile(filePath string) string {
 		return ""
 	}
 	return "# From:" + filePath + "\n" + string(content)
+}
+
+func readWorkspacePromptOverride(relativePath string) string {
+	cfg := config.Get()
+	if cfg == nil {
+		return ""
+	}
+
+	baseDir := cfg.Data.Directory
+	if !filepath.IsAbs(baseDir) {
+		baseDir = filepath.Join(config.WorkingDirectory(), baseDir)
+	}
+
+	fullPath := filepath.Join(baseDir, "prompts", relativePath)
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(string(content))
 }

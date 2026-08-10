@@ -98,7 +98,6 @@ func lspsConfigured(width int) string {
 }
 
 func logo(width int) string {
-	logo := fmt.Sprintf("%s %s", styles.OpenCodeIcon, "OpenCode")
 	t := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
 
@@ -106,21 +105,21 @@ func logo(width int) string {
 		Foreground(t.TextMuted()).
 		Render(version.Version)
 
+	title := baseStyle.Bold(true).Render("CrowCode")
+
 	return baseStyle.
-		Bold(true).
 		Width(width).
 		Render(
-			lipgloss.JoinHorizontal(
+			lipgloss.JoinVertical(
 				lipgloss.Left,
-				logo,
-				" ",
-				versionText,
+				styles.CrowLogoASCII,
+				lipgloss.JoinHorizontal(lipgloss.Left, title, " ", versionText),
 			),
 		)
 }
 
 func repo(width int) string {
-	repo := "https://github.com/opencode-ai/opencode"
+	repo := "CrowCode"
 	t := theme.CurrentTheme()
 
 	return styles.BaseStyle().
@@ -138,4 +137,3 @@ func cwd(width int) string {
 		Width(width).
 		Render(cwd)
 }
-

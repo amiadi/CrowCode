@@ -1,11 +1,11 @@
-# OpenCode Configuration Schema Generator
+# CrowCode Configuration Schema Generator
 
-This tool generates a JSON Schema for the OpenCode configuration file. The schema can be used to validate configuration files and provide autocompletion in editors that support JSON Schema.
+This tool generates a JSON Schema for the CrowCode configuration file. The schema can be used to validate configuration files and provide autocompletion in editors that support JSON Schema.
 
 ## Usage
 
 ```bash
-go run cmd/schema/main.go > opencode-schema.json
+go run cmd/schema/main.go > crowcode-schema.json
 ```
 
 This will generate a JSON Schema file that can be used to validate configuration files.
@@ -24,7 +24,7 @@ The generated schema includes:
 
 You can use the generated schema in several ways:
 
-1. **Editor Integration**: Many editors (VS Code, JetBrains IDEs, etc.) support JSON Schema for validation and autocompletion. You can configure your editor to use the generated schema for `.opencode.json` files.
+1. **Editor Integration**: Many editors (VS Code, JetBrains IDEs, etc.) support JSON Schema for validation and autocompletion. You can configure your editor to use the generated schema for `.crowcode.json` files.
 
 2. **Validation Tools**: You can use tools like [jsonschema](https://github.com/Julian/jsonschema) to validate your configuration files against the schema.
 
@@ -37,26 +37,41 @@ Here's an example configuration that conforms to the schema:
 ```json
 {
   "data": {
-    "directory": ".opencode"
+    "directory": ".crowcode"
   },
+  "localEndpoint": "http://127.0.0.1:11434",
+  "localOnly": true,
   "debug": false,
+  "rag": {
+    "enabled": true,
+    "topK": 5,
+    "minScore": 0.2,
+    "maxContextChars": 3200,
+    "embeddings": {
+      "provider": "ollama",
+      "model": "nomic-embed-text",
+      "dimensions": 768,
+      "timeoutMs": 15000
+    }
+  },
   "providers": {
-    "anthropic": {
-      "apiKey": "your-api-key"
+    "local": {
+      "apiKey": "dummy",
+      "disabled": false
     }
   },
   "agents": {
     "coder": {
-      "model": "claude-3.7-sonnet",
+      "model": "local.qwen2.5-coder:latest",
       "maxTokens": 5000,
       "reasoningEffort": "medium"
     },
     "task": {
-      "model": "claude-3.7-sonnet",
+      "model": "local.qwen2.5-coder:latest",
       "maxTokens": 5000
     },
     "title": {
-      "model": "claude-3.7-sonnet",
+      "model": "local.qwen2.5-coder:latest",
       "maxTokens": 80
     }
   }

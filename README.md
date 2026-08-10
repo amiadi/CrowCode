@@ -1,4 +1,10 @@
-# Archived: Project has Moved
+# CrowCode
+
+CrowCode is a customized distribution of CrowCode focused on local-first workflows,
+including local or container-backed Ollama usage and SQLite-backed RAG.
+
+Note:
+Cross-platform support target: Linux and Windows are both first-class environments for CrowCode features and tools.
 
 This repository is no longer maintained and has been archived for provenance.
 
@@ -9,7 +15,7 @@ Please follow [Crush][crush] for ongoing development.
 [crush]: https://github.com/charmbracelet/crush
 
 
-# ⌬ OpenCode
+# ⌬ CrowCode
 
 <p align="center"><img src="https://github.com/user-attachments/assets/9ae61ef6-70e5-4876-bc45-5bcb4e52c714" width="800"></p>
 
@@ -19,10 +25,10 @@ A powerful terminal-based AI assistant for developers, providing intelligent cod
 
 ## Overview
 
-OpenCode is a Go-based CLI application that brings AI assistance to your terminal. It provides a TUI (Terminal User Interface) for interacting with various AI models to help with coding tasks, debugging, and more.
+CrowCode is a Go-based CLI application that brings AI assistance to your terminal. It provides a TUI (Terminal User Interface) for interacting with various AI models to help with coding tasks, debugging, and more.
 
 <p>For a quick video overview, check out
-<a href="https://www.youtube.com/watch?v=P8luPmEa1QI"><img width="25" src="https://upload.wikimedia.org/wikipedia/commons/0/09/YouTube_full-color_icon_%282017%29.svg"> OpenCode + Gemini 2.5 Pro: BYE Claude Code! I'm SWITCHING To the FASTEST AI Coder!</a></p>
+<a href="https://www.youtube.com/watch?v=P8luPmEa1QI"><img width="25" src="https://upload.wikimedia.org/wikipedia/commons/0/09/YouTube_full-color_icon_%282017%29.svg"> CrowCode + Gemini 2.5 Pro: BYE Claude Code! I'm SWITCHING To the FASTEST AI Coder!</a></p>
 
 <a href="https://www.youtube.com/watch?v=P8luPmEa1QI"><img width="550" src="https://i3.ytimg.com/vi/P8luPmEa1QI/maxresdefault.jpg"></a><p>
 
@@ -39,51 +45,258 @@ OpenCode is a Go-based CLI application that brings AI assistance to your termina
 - **External Editor Support**: Open your preferred editor for composing messages
 - **Named Arguments for Custom Commands**: Create powerful custom commands with multiple named placeholders
 
+## RAG Connector Quickstart
+
+Use `rag index` to ingest local folders or mounted remote shares with recursive traversal.
+
+Index a local folder recursively:
+
+```bash
+crowcode rag index \
+  --source-type directory \
+  --uri folder://project-docs \
+  --directory-path ./docs \
+  --recursive \
+  --max-files 1000 \
+  --max-bytes 33554432 \
+  --title "Project Docs" \
+  --external-id project-docs-v1
+```
+
+Index a Linux mounted share recursively:
+
+```bash
+crowcode rag index \
+  --source-type remote_share \
+  --uri share://linux-team \
+  --directory-path /mnt/team-share/knowledge \
+  --recursive \
+  --title "Linux Team Share" \
+  --external-id linux-team-share-v1
+```
+
+Index a Windows UNC share recursively:
+
+```bash
+crowcode rag index \
+  --source-type remote_share \
+  --uri share://windows-team \
+  --directory-path "\\\\server\\share\\knowledge" \
+  --recursive \
+  --title "Windows Team Share" \
+  --external-id windows-team-share-v1
+```
+
+Common connector flags:
+- `--directory-path` folder or share path (`/mnt/...`, `\\server\\share\\...`, `file://`, `smb://`)
+- `--recursive` recurse nested folders (default: `true`)
+- `--max-files` max files to ingest (default: `500`)
+- `--max-bytes` max total bytes to ingest (default: `16777216`)
+
+## Documentation Book
+
+For complete onboarding and advanced usage, use the project documentation book:
+
+- Book Home: [docs/book/README.md](docs/book/README.md)
+- Administrator Guide: [docs/book/administrator-guide.md](docs/book/administrator-guide.md)
+- User Guide: [docs/book/user-guide.md](docs/book/user-guide.md)
+- Tools Reference: [docs/book/tools-reference.md](docs/book/tools-reference.md)
+
+## Built-in MCP Servers and Auto-Discovery
+
+CrowCode ships with built-in MCP profiles and supports auto-discovery for user-installed MCP servers.
+
+Built-in profiles available out of the box:
+
+CrowCode auto-loads MCP servers from:
+
+### Offline local binary discovery (no JSON manifests required)
+
+Users can drop pre-downloaded MCP server binaries directly into discovery folders and CrowCode will auto-register them as `stdio` MCP servers.
+
+Binary discovery folders:
+
+Compatibility folders also scanned for binaries:
+
+Example (offline binary drop-in):
+
+```bash
+mkdir -p ./.crowcode/mcp/bin
+cp ./downloads/my-mcp-server ./.crowcode/mcp/bin/
+chmod +x ./.crowcode/mcp/bin/my-mcp-server
+crowcode
+```
+
+The server is auto-registered with a normalized name derived from the file name (for example `my-mcp-server` -> `my_mcp_server`).
+
+Priority behavior:
+
+Inspect effective MCP servers and their source:
+
+```bash
+crowcode mcp list
+```
+
+Filter by source:
+
+```bash
+crowcode mcp list --source explicit
+crowcode mcp list --source manifest,binary
+```
+
+Filter by type:
+
+```bash
+crowcode mcp list --type stdio
+crowcode mcp list --type sse
+```
+
+This command shows, for each effective MCP server:
+- server name
+- source (`explicit`, `manifest`, `binary`)
+- type (`stdio` or `sse`)
+- endpoint/command
+- origin file path or runtime path
+
 ## Installation
 
-### Using the Install Script
+### Online Install (Linux and macOS)
 
 ```bash
-# Install the latest version
-curl -fsSL https://raw.githubusercontent.com/opencode-ai/opencode/refs/heads/main/install | bash
-
-# Install a specific version
-curl -fsSL https://raw.githubusercontent.com/opencode-ai/opencode/refs/heads/main/install | VERSION=0.1.0 bash
+curl -fsSL https://raw.githubusercontent.com/crowcode-ai/crowcode/main/install | bash
 ```
 
-### Using Homebrew (macOS and Linux)
+### Offline Install (Linux and Windows)
+
+Linux:
 
 ```bash
-brew install opencode-ai/tap/opencode
+tar -xzf crowcode-linux-amd64.tar.gz
+chmod +x crowcode
+./crowcode -v
 ```
 
-### Using AUR (Arch Linux)
+Windows PowerShell:
+
+```powershell
+Expand-Archive .\crowcode-windows-amd64.zip -DestinationPath .\crowcode
+.\crowcode\crowcode.exe -v
+```
+
+### Online Clone and Build
 
 ```bash
-# Using yay
-yay -S opencode-ai-bin
-
-# Using paru
-paru -S opencode-ai-bin
+git clone https://github.com/crowcode-ai/crowcode.git
+cd crowcode
+go build -o crowcode
+./crowcode -v
 ```
 
-### Using Go
+### Offline Clone and Build
+
+Create a bundle from an online machine:
 
 ```bash
-go install github.com/opencode-ai/opencode@latest
+git clone https://github.com/crowcode-ai/crowcode.git
+cd crowcode
+git bundle create crowcode.bundle --all
 ```
+
+Import and build on an offline machine:
+
+```bash
+git clone crowcode.bundle crowcode
+cd crowcode
+go build -o crowcode
+./crowcode -v
+```
+
+### Linux and Windows Cross-Compilation
+
+Linux:
+
+```bash
+GOOS=linux GOARCH=amd64 go build -o dist/crowcode-linux-amd64
+GOOS=linux GOARCH=arm64 go build -o dist/crowcode-linux-arm64
+```
+
+Windows:
+
+```bash
+GOOS=windows GOARCH=amd64 go build -o dist/crowcode-windows-amd64.exe
+GOOS=windows GOARCH=arm64 go build -o dist/crowcode-windows-arm64.exe
+```
+
+### Package Managers (upstream crowcode ecosystem)
+
+```bash
+brew install crowcode-ai/tap/crowcode
+```
+
+```bash
+yay -S crowcode-ai-bin
+```
+
+```bash
+paru -S crowcode-ai-bin
+```
+
+### Using Go install
+
+```bash
+go install github.com/crowcode-ai/crowcode@latest
+```
+
+When using `go install`, build or rename the binary to `crowcode` for CrowCode CLI naming.
 
 ## Configuration
 
-OpenCode looks for configuration in the following locations:
+- `$HOME/.crowcode.json`
+- `$XDG_CONFIG_HOME/crowcode/.crowcode.json`
+- `./.crowcode.json` (local directory)
 
-- `$HOME/.opencode.json`
-- `$XDG_CONFIG_HOME/opencode/.opencode.json`
-- `./.opencode.json` (local directory)
+### Connection Setup Wizard (CLI + TUI)
+
+CrowCode includes a guided setup wizard for local OpenAI-compatible endpoints:
+- Ollama (default `http://127.0.0.1:11434`)
+- vLLM (default `http://127.0.0.1:8000`)
+- SGLang (default `http://127.0.0.1:30000`)
+
+Run the CLI wizard:
+
+```bash
+crowcode setup
+```
+
+Non-interactive example:
+
+```bash
+crowcode setup \
+  --yes \
+  --provider ollama \
+  --endpoint http://192.168.1.25:11434 \
+  --local-only \
+  --prefer-ollama-embedder
+```
+
+Open from TUI:
+1. Start `crowcode`
+2. Press `Ctrl+K`
+3. Select `Setup Local Connection Wizard`
+
+Wizard output updates config values such as `localEndpoint`, `localOnly`, and local provider defaults.
+
+Setup flags reference:
+- `--provider`: `ollama`, `vllm`, or `sglang`
+- `--endpoint`: server URL such as `http://127.0.0.1:11434`
+- `--local-only`: disable non-local providers for this config
+- `--prefer-ollama-embedder`: set RAG embeddings provider to `ollama`
+- `--no-probe`: skip endpoint connectivity probe
+- `--yes`: non-interactive mode using only provided flags
 
 ### Auto Compact Feature
 
-OpenCode includes an auto compact feature that automatically summarizes your conversation when it approaches the model's context window limit. When enabled (default setting), this feature:
+CrowCode includes an auto compact feature that automatically summarizes your conversation when it approaches the model's context window limit. When enabled (default setting), this feature:
 
 - Monitors token usage during your conversation
 - Automatically triggers summarization when usage reaches 95% of the model's context window
@@ -100,7 +313,7 @@ You can enable or disable this feature in your configuration file:
 
 ### Environment Variables
 
-You can configure OpenCode using environment variables:
+You can configure CrowCode using environment variables:
 
 | Environment Variable       | Purpose                                                                          |
 | -------------------------- | -------------------------------------------------------------------------------- |
@@ -122,7 +335,7 @@ You can configure OpenCode using environment variables:
 
 ### Shell Configuration
 
-OpenCode allows you to configure the shell used by the bash tool. By default, it uses the shell specified in the `SHELL` environment variable, or falls back to `/bin/bash` if not set.
+CrowCode allows you to configure the shell used by the bash tool. By default, it uses the shell specified in the `SHELL` environment variable, or falls back to `/bin/bash` if not set.
 
 You can override this in your configuration file:
 
@@ -142,7 +355,7 @@ This is useful if you want to use a different shell than your default system she
 ```json
 {
   "data": {
-    "directory": ".opencode"
+    "directory": ".crowcode"
   },
   "providers": {
     "openai": {
@@ -205,7 +418,7 @@ This is useful if you want to use a different shell than your default system she
 
 ## Supported AI Models
 
-OpenCode supports a variety of AI models from different providers:
+CrowCode supports a variety of AI models from different providers:
 
 ### OpenAI
 
@@ -279,38 +492,38 @@ OpenCode supports a variety of AI models from different providers:
 ## Usage
 
 ```bash
-# Start OpenCode
-opencode
+# Start CrowCode
+crowcode
 
 # Start with debug logging
-opencode -d
+crowcode -d
 
 # Start with a specific working directory
-opencode -c /path/to/project
+crowcode -c /path/to/project
 ```
 
 ## Non-interactive Prompt Mode
 
-You can run OpenCode in non-interactive mode by passing a prompt directly as a command-line argument. This is useful for scripting, automation, or when you want a quick answer without launching the full TUI.
+You can run CrowCode in non-interactive mode by passing a prompt directly as a command-line argument. This is useful for scripting, automation, or when you want a quick answer without launching the full TUI.
 
 ```bash
 # Run a single prompt and print the AI's response to the terminal
-opencode -p "Explain the use of context in Go"
+crowcode -p "Explain the use of context in Go"
 
 # Get response in JSON format
-opencode -p "Explain the use of context in Go" -f json
+crowcode -p "Explain the use of context in Go" -f json
 
 # Run without showing the spinner (useful for scripts)
-opencode -p "Explain the use of context in Go" -q
+crowcode -p "Explain the use of context in Go" -q
 ```
 
-In this mode, OpenCode will process your prompt, print the result to standard output, and then exit. All permissions are auto-approved for the session.
+In this mode, CrowCode will process your prompt, print the result to standard output, and then exit. All permissions are auto-approved for the session.
 
-By default, a spinner animation is displayed while the model is processing your query. You can disable this spinner with the `-q` or `--quiet` flag, which is particularly useful when running OpenCode from scripts or automated workflows.
+By default, a spinner animation is displayed while the model is processing your query. You can disable this spinner with the `-q` or `--quiet` flag, which is particularly useful when running CrowCode from scripts or automated workflows.
 
 ### Output Formats
 
-OpenCode supports the following output formats in non-interactive mode:
+CrowCode supports the following output formats in non-interactive mode:
 
 | Format | Description                     |
 | ------ | ------------------------------- |
@@ -401,7 +614,7 @@ The output format is implemented as a strongly-typed `OutputFormat` in the codeb
 
 ## AI Assistant Tools
 
-OpenCode's AI assistant has access to various tools to help with coding tasks:
+CrowCode's AI assistant has access to various tools to help with coding tasks:
 
 ### File and Code Tools
 
@@ -427,7 +640,7 @@ OpenCode's AI assistant has access to various tools to help with coding tasks:
 
 ## Architecture
 
-OpenCode is built with a modular architecture:
+CrowCode is built with a modular architecture:
 
 - **cmd**: Command-line interface using Cobra
 - **internal/app**: Core application services
@@ -442,7 +655,7 @@ OpenCode is built with a modular architecture:
 
 ## Custom Commands
 
-OpenCode supports custom commands that can be created by users to quickly send predefined prompts to the AI assistant.
+CrowCode supports custom commands that can be created by users to quickly send predefined prompts to the AI assistant.
 
 ### Creating Custom Commands
 
@@ -451,26 +664,26 @@ Custom commands are predefined prompts stored as Markdown files in one of three 
 1. **User Commands** (prefixed with `user:`):
 
    ```
-   $XDG_CONFIG_HOME/opencode/commands/
+   $XDG_CONFIG_HOME/crowcode/commands/
    ```
 
-   (typically `~/.config/opencode/commands/` on Linux/macOS)
+   (typically `~/.config/crowcode/commands/` on Linux/macOS)
 
    or
 
    ```
-   $HOME/.opencode/commands/
+   $HOME/.crowcode/commands/
    ```
 
 2. **Project Commands** (prefixed with `project:`):
 
    ```
-   <PROJECT DIR>/.opencode/commands/
+   <PROJECT DIR>/.crowcode/commands/
    ```
 
 Each `.md` file in these directories becomes a custom command. The file name (without extension) becomes the command ID.
 
-For example, creating a file at `~/.config/opencode/commands/prime-context.md` with content:
+For example, creating a file at `~/.config/crowcode/commands/prime-context.md` with content:
 
 ```markdown
 RUN git ls-files
@@ -481,7 +694,7 @@ This creates a command called `user:prime-context`.
 
 ### Command Arguments
 
-OpenCode supports named arguments in custom commands using placeholders in the format `$NAME` (where NAME consists of uppercase letters, numbers, and underscores, and must start with a letter).
+CrowCode supports named arguments in custom commands using placeholders in the format `$NAME` (where NAME consists of uppercase letters, numbers, and underscores, and must start with a letter).
 
 For example:
 
@@ -493,7 +706,7 @@ RUN git grep --author="$AUTHOR_NAME" -n .
 RUN grep -R "$SEARCH_PATTERN" $DIRECTORY
 ```
 
-When you run a command with arguments, OpenCode will prompt you to enter values for each unique placeholder. Named arguments provide several benefits:
+When you run a command with arguments, CrowCode will prompt you to enter values for each unique placeholder. Named arguments provide several benefits:
 
 - Clear identification of what each argument represents
 - Ability to use the same argument multiple times
@@ -504,7 +717,7 @@ When you run a command with arguments, OpenCode will prompt you to enter values 
 You can organize commands in subdirectories:
 
 ```
-~/.config/opencode/commands/git/commit.md
+~/.config/crowcode/commands/git/commit.md
 ```
 
 This creates a command with ID `user:git:commit`.
@@ -519,16 +732,16 @@ The content of the command file will be sent as a message to the AI assistant.
 
 ### Built-in Commands
 
-OpenCode includes several built-in commands:
+CrowCode includes several built-in commands:
 
 | Command            | Description                                                                                         |
 | ------------------ | --------------------------------------------------------------------------------------------------- |
-| Initialize Project | Creates or updates the OpenCode.md memory file with project-specific information                    |
+| Initialize Project | Creates or updates the CrowCode.md memory file with project-specific information                    |
 | Compact Session    | Manually triggers the summarization of the current session, creating a new session with the summary |
 
 ## MCP (Model Context Protocol)
 
-OpenCode implements the Model Context Protocol (MCP) to extend its capabilities through external tools. MCP provides a standardized way for the AI assistant to interact with external services and tools.
+CrowCode implements the Model Context Protocol (MCP) to extend its capabilities through external tools. MCP provides a standardized way for the AI assistant to interact with external services and tools.
 
 ### MCP Features
 
@@ -569,7 +782,7 @@ Once configured, MCP tools are automatically available to the AI assistant along
 
 ## LSP (Language Server Protocol)
 
-OpenCode integrates with Language Server Protocol to provide code intelligence features across multiple programming languages.
+CrowCode integrates with Language Server Protocol to provide code intelligence features across multiple programming languages.
 
 ### LSP Features
 
@@ -623,17 +836,17 @@ the tool with your github account. This should create a github token at one of t
 - ~/.config/github-copilot/[hosts,apps].json
 - $XDG_CONFIG_HOME/github-copilot/[hosts,apps].json
 
-If using an explicit github token, you may either set the $GITHUB_TOKEN environment variable or add it to the opencode.json config file at `providers.copilot.apiKey`.
+If using an explicit github token, you may either set the $GITHUB_TOKEN environment variable or add it to the crowcode.json config file at `providers.copilot.apiKey`.
 
 ## Using a self-hosted model provider
 
-OpenCode can also load and use models from a self-hosted (OpenAI-like) provider.
+CrowCode can also load and use models from a self-hosted (OpenAI-like) provider.
 This is useful for developers who want to experiment with custom models.
 
 ### Configuring a self-hosted provider
 
 You can use a self-hosted model by setting the `LOCAL_ENDPOINT` environment variable.
-This will cause OpenCode to load and use the models from the specified endpoint.
+This will cause CrowCode to load and use the models from the specified endpoint.
 
 ```bash
 LOCAL_ENDPOINT=http://localhost:1235/v1
@@ -654,6 +867,213 @@ You can also configure a self-hosted model in the configuration file under the `
 }
 ```
 
+### Strict local-only Ollama example
+
+If you want to force CrowCode to use only local or container-backed Ollama models,
+enable `localOnly` and set per-agent runtime controls:
+
+```json
+{
+  "localOnly": true,
+  "agents": {
+    "coder": {
+      "model": "local.<your-ollama-model-id>",
+      "maxTokens": 8192,
+      "reasoningEffort": "high",
+      "temperature": 0.2,
+      "topP": 0.9,
+      "minP": 0.05,
+      "topK": 40,
+      "numCtx": 32768,
+      "repeatPenalty": 1.1,
+      "seed": 42
+    },
+    "summarizer": {
+      "model": "local.<your-ollama-model-id>",
+      "maxTokens": 2048,
+      "reasoningEffort": "medium",
+      "temperature": 0.1,
+      "topP": 0.8,
+      "minP": 0.03,
+      "topK": 30,
+      "numCtx": 32768,
+      "repeatPenalty": 1.05,
+      "seed": 42
+    },
+    "task": {
+      "model": "local.<your-ollama-model-id>",
+      "maxTokens": 4096,
+      "reasoningEffort": "medium",
+      "temperature": 0.2,
+      "topP": 0.9,
+      "minP": 0.05,
+      "topK": 40,
+      "numCtx": 32768,
+      "repeatPenalty": 1.1,
+      "seed": 42
+    }
+  }
+}
+```
+
+With `localOnly: true`, CrowCode disables non-local providers at validation time and
+forces all core agents to a discovered local model.
+
+### Chat-time RAG augmentation
+
+CrowCode can inject retrieved SQLite context into chat-time prompts before model generation.
+
+```json
+{
+  "rag": {
+    "enabled": true,
+    "topK": 5,
+    "minScore": 0.2,
+    "maxContextChars": 3200,
+    "embeddings": {
+      "provider": "ollama",
+      "model": "nomic-embed-text",
+      "dimensions": 768,
+      "timeoutMs": 15000
+    }
+  }
+}
+```
+
+Notes:
+- `provider: "ollama"` uses `LOCAL_ENDPOINT` for embedding requests.
+- Supported endpoint shapes include `/api/embed`, `/api/embeddings`, and `/v1/embeddings`.
+- Set `provider` to `hash` for an offline fallback embedder.
+
+### RAG index connectors and recursive folder ingestion
+
+CrowCode supports multiple ingestion connectors through `rag index`.
+
+Supported source types:
+- `manual` and `local_file` via `--text` or `--text-file`
+- `web` via `--uri` (http/https)
+- `sql` via `--sql-dsn` and `--sql-query`
+- `object_storage` via `--object-uri` (file path, `file://`, or presigned `https://`)
+- `directory`, `folder`, `local_folder`, `remote_share` via recursive folder ingestion
+
+Supported offline extracted file formats for `--text-file`, local `object_storage` paths, and directory/share ingestion:
+- plain text and markup: `txt`, `md`, `markdown`, `rst`, `json`, `yaml`, `yml`, `xml`, `html`, `htm`
+- tabular: `csv`, `tsv`, `xlsx`
+- documents: `docx`, `pdf`
+
+Directory and remote share flags:
+- `--directory-path` folder/share path to ingest
+- `--recursive` recurse nested folders (default: true)
+- `--max-files` safety limit for number of files (default: 500)
+- `--max-bytes` safety limit for total bytes read (default: 16777216)
+
+Path compatibility for folder/share connector:
+- Linux local or mounted share path, for example `/mnt/team-share/docs`
+- Windows UNC style path, for example `\\server\\share\\docs`
+- `file://` URI form
+- `smb://` URI form
+
+Examples:
+
+Index local folder recursively:
+
+```bash
+crowcode rag index \
+  --source-type directory \
+  --uri folder://docs \
+  --directory-path ./docs \
+  --recursive \
+  --max-files 1000 \
+  --max-bytes 33554432 \
+  --title "Docs Folder" \
+  --external-id docs-folder-v1
+```
+
+Index Linux mounted remote share recursively:
+
+```bash
+crowcode rag index \
+  --source-type remote_share \
+  --uri share://linux-team \
+  --directory-path /mnt/team-share/knowledge \
+  --recursive \
+  --title "Team Share" \
+  --external-id team-share-v1
+```
+
+Index Windows UNC remote share recursively:
+
+```bash
+crowcode rag index \
+  --source-type remote_share \
+  --uri share://windows-team \
+  --directory-path "\\\\server\\share\\knowledge" \
+  --recursive \
+  --title "Windows Team Share" \
+  --external-id windows-team-share-v1
+```
+
+Index share using URI form:
+
+```bash
+crowcode rag index \
+  --source-type remote_share \
+  --uri share://smb-team \
+  --directory-path smb://server/share/knowledge \
+  --recursive \
+  --title "SMB Team Share" \
+  --external-id smb-team-share-v1
+```
+
+Operational notes:
+- Folder connector ingests readable supported files and skips unsupported/binary files.
+- Each ingested file is prefixed in the indexed payload for provenance (`# file: <relative_path>`).
+- Use `rag backfill-embeddings` after changing embedding backend/model to re-embed existing chunks.
+
+### Python script tools
+
+You can register allowlisted Python scripts as callable agent tools.
+
+```json
+{
+  "python": {
+    "enabled": true,
+    "interpreter": "python3",
+    "defaultTimeoutMs": 60000,
+    "requirePermission": true,
+    "tools": {
+      "summarize_repo": {
+        "path": "./scripts/summarize_repo.py",
+        "args": ["--format", "json"],
+        "timeoutMs": 30000,
+        "requirePermission": true,
+        "env": {
+          "PYTHONUNBUFFERED": "1"
+        }
+      }
+    }
+  }
+}
+```
+
+Registered tools appear as `python.<tool_name>` and run with per-execution permission checks by default.
+
+### Structured mission compaction
+
+Summarization now persists two artifacts:
+- A human-readable mission summary message.
+- A machine-readable `summary_state` JSON payload stored on the session record.
+
+The structured summary captures:
+- conversation summary
+- current focus
+- decisions
+- completed tasks
+- pending tasks
+- risks
+- next action
+- files touched
+
 ## Development
 
 ### Prerequisites
@@ -664,19 +1084,19 @@ You can also configure a self-hosted model in the configuration file under the `
 
 ```bash
 # Clone the repository
-git clone https://github.com/opencode-ai/opencode.git
-cd opencode
+git clone https://github.com/crowcode-ai/crowcode.git
+cd crowcode
 
 # Build
-go build -o opencode
+go build -o crowcode
 
 # Run
-./opencode
+./crowcode
 ```
 
 ## Acknowledgments
 
-OpenCode gratefully acknowledges the contributions and support from these key individuals:
+CrowCode gratefully acknowledges the contributions and support from these key individuals:
 
 - [@isaacphi](https://github.com/isaacphi) - For the [mcp-language-server](https://github.com/isaacphi/mcp-language-server) project which provided the foundation for our LSP client implementation
 - [@adamdottv](https://github.com/adamdottv) - For the design direction and UI/UX architecture
@@ -685,7 +1105,7 @@ Special thanks to the broader open source community whose tools and libraries ha
 
 ## License
 
-OpenCode is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+CrowCode is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 

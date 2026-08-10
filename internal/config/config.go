@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/opencode-ai/opencode/internal/llm/models"
@@ -48,6 +49,13 @@ type Agent struct {
 	Model           models.ModelID `json:"model"`
 	MaxTokens       int64          `json:"maxTokens"`
 	ReasoningEffort string         `json:"reasoningEffort"` // For openai models low,medium,heigh
+	Temperature     *float64       `json:"temperature,omitempty"`
+	TopP            *float64       `json:"topP,omitempty"`
+	MinP            *float64       `json:"minP,omitempty"`
+	TopK            *int64         `json:"topK,omitempty"`
+	NumCtx          *int64         `json:"numCtx,omitempty"`
+	RepeatPenalty   *float64       `json:"repeatPenalty,omitempty"`
+	Seed            *int64         `json:"seed,omitempty"`
 }
 
 // Provider defines configuration for an LLM provider.
@@ -80,27 +88,62 @@ type ShellConfig struct {
 	Args []string `json:"args,omitempty"`
 }
 
+type RAGEmbeddingsConfig struct {
+	Provider   string `json:"provider,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Dimensions int    `json:"dimensions,omitempty"`
+	TimeoutMs  int    `json:"timeoutMs,omitempty"`
+}
+
+type RAGConfig struct {
+	Enabled         bool                `json:"enabled,omitempty"`
+	TopK            int64               `json:"topK,omitempty"`
+	MinScore        float64             `json:"minScore,omitempty"`
+	MaxContextChars int                 `json:"maxContextChars,omitempty"`
+	Embeddings      RAGEmbeddingsConfig `json:"embeddings,omitempty"`
+}
+
+type PythonToolConfig struct {
+	Path              string            `json:"path"`
+	Args              []string          `json:"args,omitempty"`
+	Env               map[string]string `json:"env,omitempty"`
+	TimeoutMs         int               `json:"timeoutMs,omitempty"`
+	RequirePermission *bool             `json:"requirePermission,omitempty"`
+}
+
+type PythonConfig struct {
+	Enabled           bool                        `json:"enabled,omitempty"`
+	Interpreter       string                      `json:"interpreter,omitempty"`
+	DefaultTimeoutMs  int                         `json:"defaultTimeoutMs,omitempty"`
+	RequirePermission bool                        `json:"requirePermission,omitempty"`
+	Tools             map[string]PythonToolConfig `json:"tools,omitempty"`
+}
+
 // Config is the main configuration structure for the application.
 type Config struct {
-	Data         Data                              `json:"data"`
-	WorkingDir   string                            `json:"wd,omitempty"`
-	MCPServers   map[string]MCPServer              `json:"mcpServers,omitempty"`
-	Providers    map[models.ModelProvider]Provider `json:"providers,omitempty"`
-	LSP          map[string]LSPConfig              `json:"lsp,omitempty"`
-	Agents       map[AgentName]Agent               `json:"agents,omitempty"`
-	Debug        bool                              `json:"debug,omitempty"`
-	DebugLSP     bool                              `json:"debugLSP,omitempty"`
-	ContextPaths []string                          `json:"contextPaths,omitempty"`
-	TUI          TUIConfig                         `json:"tui"`
-	Shell        ShellConfig                       `json:"shell,omitempty"`
-	AutoCompact  bool                              `json:"autoCompact,omitempty"`
+	Data          Data                              `json:"data"`
+	WorkingDir    string                            `json:"wd,omitempty"`
+	LocalEndpoint string                            `json:"localEndpoint,omitempty"`
+	MCPServers    map[string]MCPServer              `json:"mcpServers,omitempty"`
+	Providers     map[models.ModelProvider]Provider `json:"providers,omitempty"`
+	LSP           map[string]LSPConfig              `json:"lsp,omitempty"`
+	Agents        map[AgentName]Agent               `json:"agents,omitempty"`
+	Debug         bool                              `json:"debug,omitempty"`
+	DebugLSP      bool                              `json:"debugLSP,omitempty"`
+	ContextPaths  []string                          `json:"contextPaths,omitempty"`
+	TUI           TUIConfig                         `json:"tui"`
+	Shell         ShellConfig                       `json:"shell,omitempty"`
+	RAG           RAGConfig                         `json:"rag,omitempty"`
+	Python        PythonConfig                      `json:"python,omitempty"`
+	AutoCompact   bool                              `json:"autoCompact,omitempty"`
+	LocalOnly     bool                              `json:"localOnly,omitempty"`
 }
 
 // Application constants
 const (
-	defaultDataDirectory = ".opencode"
+	defaultDataDirectory = ".crowcode"
 	defaultLogLevel      = "info"
-	appName              = "opencode"
+	appName              = "crowcode"
 
 	MaxTokensFallbackDefault = 4096
 )
@@ -111,12 +154,12 @@ var defaultContextPaths = []string{
 	".cursor/rules/",
 	"CLAUDE.md",
 	"CLAUDE.local.md",
-	"opencode.md",
-	"opencode.local.md",
-	"OpenCode.md",
-	"OpenCode.local.md",
-	"OPENCODE.md",
-	"OPENCODE.local.md",
+	"crowcode.md",
+	"crowcode.local.md",
+	"CrowCode.md",
+	"CrowCode.local.md",
+	"CROWCODE.md",
+	"CROWCODE.local.md",
 }
 
 // Global configuration instance
@@ -153,6 +196,10 @@ func Load(workingDir string, debug bool) (*Config, error) {
 	// Apply configuration to the struct
 	if err := viper.Unmarshal(cfg); err != nil {
 		return cfg, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	if err := mergeAutoDiscoveredMCPServers(cfg); err != nil {
+		logging.Warn("failed to auto-discover mcp servers", "error", err)
 	}
 
 	applyDefaultValues()
@@ -230,8 +277,22 @@ func configureViper() {
 func setDefaults(debug bool) {
 	viper.SetDefault("data.directory", defaultDataDirectory)
 	viper.SetDefault("contextPaths", defaultContextPaths)
-	viper.SetDefault("tui.theme", "opencode")
+	viper.SetDefault("tui.theme", "crowcode")
 	viper.SetDefault("autoCompact", true)
+	viper.SetDefault("localEndpoint", os.Getenv("LOCAL_ENDPOINT"))
+	viper.SetDefault("localOnly", false)
+	viper.SetDefault("rag.enabled", true)
+	viper.SetDefault("rag.topK", 5)
+	viper.SetDefault("rag.minScore", 0.2)
+	viper.SetDefault("rag.maxContextChars", 3200)
+	viper.SetDefault("rag.embeddings.provider", "ollama")
+	viper.SetDefault("rag.embeddings.model", "nomic-embed-text")
+	viper.SetDefault("rag.embeddings.dimensions", 768)
+	viper.SetDefault("rag.embeddings.timeoutMs", 15000)
+	viper.SetDefault("python.enabled", false)
+	viper.SetDefault("python.interpreter", DefaultPythonInterpreter())
+	viper.SetDefault("python.defaultTimeoutMs", 60000)
+	viper.SetDefault("python.requirePermission", true)
 
 	// Set default shell from environment or fallback to /bin/bash
 	shellPath := os.Getenv("SHELL")
@@ -250,9 +311,20 @@ func setDefaults(debug bool) {
 	}
 }
 
+func DefaultPythonInterpreter() string {
+	if runtime.GOOS == "windows" {
+		return "python"
+	}
+	return "python3"
+}
+
 // setProviderDefaults configures LLM provider defaults based on provider provided by
 // environment variables and configuration file.
 func setProviderDefaults() {
+	if endpoint := strings.TrimSpace(viper.GetString("localEndpoint")); endpoint != "" {
+		models.BootstrapLocalModels(endpoint)
+	}
+
 	// Set all API keys we can find in the environment
 	// Note: Viper does not default if the json apiKey is ""
 	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
@@ -285,6 +357,7 @@ func setProviderDefaults() {
 	}
 
 	// Use this order to set the default models
+	// 0. Local (when configured through LOCAL_ENDPOINT bootstrap)
 	// 1. Copilot
 	// 2. Anthropic
 	// 3. OpenAI
@@ -294,6 +367,12 @@ func setProviderDefaults() {
 	// 7. AWS Bedrock
 	// 8. Azure
 	// 9. Google Cloud VertexAI
+
+	// local configuration (set by local model bootstrap)
+	if key := viper.GetString("providers.local.apiKey"); strings.TrimSpace(key) != "" {
+		// local models are discovered dynamically and defaults are set in loadLocalModels
+		return
+	}
 
 	// copilot configuration
 	if key := viper.GetString("providers.copilot.apiKey"); strings.TrimSpace(key) != "" {
@@ -469,6 +548,71 @@ func applyDefaultValues() {
 			cfg.MCPServers[k] = v
 		}
 	}
+
+	if cfg.Python.Tools == nil {
+		cfg.Python.Tools = make(map[string]PythonToolConfig)
+	}
+}
+
+func validateRAGConfig(cfg *Config) {
+	if cfg.RAG.TopK <= 0 {
+		cfg.RAG.TopK = 5
+	}
+	if cfg.RAG.MinScore < 0 || cfg.RAG.MinScore > 1 {
+		cfg.RAG.MinScore = 0.2
+	}
+	if cfg.RAG.MaxContextChars <= 0 {
+		cfg.RAG.MaxContextChars = 3200
+	}
+	if strings.TrimSpace(cfg.RAG.Embeddings.Provider) == "" {
+		cfg.RAG.Embeddings.Provider = "ollama"
+	} else {
+		provider := strings.ToLower(strings.TrimSpace(cfg.RAG.Embeddings.Provider))
+		switch provider {
+		case "ollama", "hash", "local":
+			cfg.RAG.Embeddings.Provider = provider
+		default:
+			logging.Warn("unsupported rag embedding provider, falling back to ollama", "provider", cfg.RAG.Embeddings.Provider)
+			cfg.RAG.Embeddings.Provider = "ollama"
+		}
+	}
+	if strings.TrimSpace(cfg.RAG.Embeddings.Model) == "" {
+		cfg.RAG.Embeddings.Model = "nomic-embed-text"
+	}
+	if cfg.RAG.Embeddings.Dimensions <= 0 {
+		cfg.RAG.Embeddings.Dimensions = 768
+	}
+	if cfg.RAG.Embeddings.TimeoutMs <= 0 {
+		cfg.RAG.Embeddings.TimeoutMs = 15000
+	}
+}
+
+func validatePythonConfig(cfg *Config) {
+	if strings.TrimSpace(cfg.Python.Interpreter) == "" {
+		cfg.Python.Interpreter = DefaultPythonInterpreter()
+	}
+	if cfg.Python.DefaultTimeoutMs <= 0 {
+		cfg.Python.DefaultTimeoutMs = 60000
+	}
+	if cfg.Python.Tools == nil {
+		cfg.Python.Tools = make(map[string]PythonToolConfig)
+	}
+
+	for name, tool := range cfg.Python.Tools {
+		if strings.TrimSpace(tool.Path) == "" {
+			logging.Warn("python tool has empty path, removing", "tool", name)
+			delete(cfg.Python.Tools, name)
+			continue
+		}
+
+		if !filepath.IsAbs(tool.Path) {
+			tool.Path = filepath.Clean(filepath.Join(cfg.WorkingDir, tool.Path))
+		}
+		if tool.TimeoutMs <= 0 {
+			tool.TimeoutMs = cfg.Python.DefaultTimeoutMs
+		}
+		cfg.Python.Tools[name] = tool
+	}
 }
 
 // It validates model IDs and providers, ensuring they are supported.
@@ -563,7 +707,7 @@ func validateAgent(cfg *Config, name AgentName, agent Agent) error {
 	}
 
 	// Validate reasoning effort for models that support reasoning
-	if model.CanReason && provider == models.ProviderOpenAI || provider == models.ProviderLocal {
+	if model.CanReason && (provider == models.ProviderOpenAI || provider == models.ProviderLocal) {
 		if agent.ReasoningEffort == "" {
 			// Set default reasoning effort for models that support it
 			logging.Info("setting default reasoning effort for model that supports reasoning",
@@ -602,6 +746,157 @@ func validateAgent(cfg *Config, name AgentName, agent Agent) error {
 		cfg.Agents[name] = updatedAgent
 	}
 
+	updatedAgent := cfg.Agents[name]
+	providerIsOpenAICompatible := provider == models.ProviderOpenAI || provider == models.ProviderLocal
+
+	if updatedAgent.Temperature != nil {
+		if *updatedAgent.Temperature < 0 || *updatedAgent.Temperature > 2 {
+			logging.Warn("invalid temperature, clearing value",
+				"agent", name,
+				"model", updatedAgent.Model,
+				"temperature", *updatedAgent.Temperature)
+			updatedAgent.Temperature = nil
+		}
+	}
+
+	if updatedAgent.TopP != nil {
+		if *updatedAgent.TopP < 0 || *updatedAgent.TopP > 1 {
+			logging.Warn("invalid top_p, clearing value",
+				"agent", name,
+				"model", updatedAgent.Model,
+				"top_p", *updatedAgent.TopP)
+			updatedAgent.TopP = nil
+		}
+	}
+
+	if updatedAgent.MinP != nil {
+		if *updatedAgent.MinP < 0 || *updatedAgent.MinP > 1 {
+			logging.Warn("invalid min_p, clearing value",
+				"agent", name,
+				"model", updatedAgent.Model,
+				"min_p", *updatedAgent.MinP)
+			updatedAgent.MinP = nil
+		}
+	}
+
+	if updatedAgent.TopK != nil {
+		if *updatedAgent.TopK < 0 {
+			logging.Warn("invalid top_k, clearing value",
+				"agent", name,
+				"model", updatedAgent.Model,
+				"top_k", *updatedAgent.TopK)
+			updatedAgent.TopK = nil
+		}
+	}
+
+	if updatedAgent.NumCtx != nil {
+		if *updatedAgent.NumCtx <= 0 {
+			logging.Warn("invalid num_ctx, clearing value",
+				"agent", name,
+				"model", updatedAgent.Model,
+				"num_ctx", *updatedAgent.NumCtx)
+			updatedAgent.NumCtx = nil
+		}
+	}
+
+	if updatedAgent.RepeatPenalty != nil {
+		if *updatedAgent.RepeatPenalty < 0 {
+			logging.Warn("invalid repeat_penalty, clearing value",
+				"agent", name,
+				"model", updatedAgent.Model,
+				"repeat_penalty", *updatedAgent.RepeatPenalty)
+			updatedAgent.RepeatPenalty = nil
+		}
+	}
+
+	if !providerIsOpenAICompatible {
+		if updatedAgent.Temperature != nil || updatedAgent.TopP != nil || updatedAgent.MinP != nil || updatedAgent.TopK != nil || updatedAgent.NumCtx != nil || updatedAgent.RepeatPenalty != nil || updatedAgent.Seed != nil {
+			logging.Warn("sampling options set for non openai-compatible provider, ignoring",
+				"agent", name,
+				"model", updatedAgent.Model,
+				"provider", provider)
+			updatedAgent.Temperature = nil
+			updatedAgent.TopP = nil
+			updatedAgent.MinP = nil
+			updatedAgent.TopK = nil
+			updatedAgent.NumCtx = nil
+			updatedAgent.RepeatPenalty = nil
+			updatedAgent.Seed = nil
+		}
+	}
+
+	cfg.Agents[name] = updatedAgent
+
+	return nil
+}
+
+func enforceLocalOnlyMode(cfg *Config) error {
+	localModels := make([]models.ModelID, 0)
+	for modelID, model := range models.SupportedModels {
+		if model.Provider == models.ProviderLocal {
+			localModels = append(localModels, modelID)
+		}
+	}
+
+	if len(localModels) == 0 {
+		return fmt.Errorf("localOnly is enabled, but no local models were discovered; set LOCAL_ENDPOINT to a reachable local or container endpoint")
+	}
+
+	sort.Slice(localModels, func(i, j int) bool {
+		return string(localModels[i]) < string(localModels[j])
+	})
+
+	if cfg.Providers == nil {
+		cfg.Providers = make(map[models.ModelProvider]Provider)
+	}
+
+	for providerName, providerCfg := range cfg.Providers {
+		if providerName == models.ProviderLocal {
+			continue
+		}
+		providerCfg.Disabled = true
+		cfg.Providers[providerName] = providerCfg
+	}
+
+	localProviderCfg := cfg.Providers[models.ProviderLocal]
+	localProviderCfg.Disabled = false
+	if strings.TrimSpace(localProviderCfg.APIKey) == "" {
+		localProviderCfg.APIKey = "dummy"
+	}
+	cfg.Providers[models.ProviderLocal] = localProviderCfg
+
+	if cfg.Agents == nil {
+		cfg.Agents = make(map[AgentName]Agent)
+	}
+
+	selectedLocalModel := localModels[0]
+	if coderAgent, ok := cfg.Agents[AgentCoder]; ok {
+		if model, modelExists := models.SupportedModels[coderAgent.Model]; modelExists && model.Provider == models.ProviderLocal {
+			selectedLocalModel = coderAgent.Model
+		}
+	}
+
+	targetAgents := []AgentName{AgentCoder, AgentSummarizer, AgentTask, AgentTitle}
+	for _, agentName := range targetAgents {
+		agentCfg := cfg.Agents[agentName]
+		if model, modelExists := models.SupportedModels[agentCfg.Model]; !modelExists || model.Provider != models.ProviderLocal {
+			agentCfg.Model = selectedLocalModel
+		}
+
+		selectedModel := models.SupportedModels[agentCfg.Model]
+		if agentName == AgentTitle {
+			agentCfg.MaxTokens = 80
+		} else if agentCfg.MaxTokens <= 0 {
+			if selectedModel.DefaultMaxTokens > 0 {
+				agentCfg.MaxTokens = selectedModel.DefaultMaxTokens
+			} else {
+				agentCfg.MaxTokens = MaxTokensFallbackDefault
+			}
+		}
+
+		cfg.Agents[agentName] = agentCfg
+	}
+
 	return nil
 }
 
@@ -610,6 +905,15 @@ func Validate() error {
 	if cfg == nil {
 		return fmt.Errorf("config not loaded")
 	}
+
+	if cfg.LocalOnly {
+		if err := enforceLocalOnlyMode(cfg); err != nil {
+			return err
+		}
+	}
+
+	validateRAGConfig(cfg)
+	validatePythonConfig(cfg)
 
 	// Validate agent models
 	for name, agent := range cfg.Agents {
@@ -897,6 +1201,13 @@ func UpdateAgentModel(agentName AgentName, modelID models.ModelID) error {
 		Model:           modelID,
 		MaxTokens:       maxTokens,
 		ReasoningEffort: existingAgentCfg.ReasoningEffort,
+		Temperature:     existingAgentCfg.Temperature,
+		TopP:            existingAgentCfg.TopP,
+		MinP:            existingAgentCfg.MinP,
+		TopK:            existingAgentCfg.TopK,
+		NumCtx:          existingAgentCfg.NumCtx,
+		RepeatPenalty:   existingAgentCfg.RepeatPenalty,
+		Seed:            existingAgentCfg.Seed,
 	}
 	cfg.Agents[agentName] = newAgentCfg
 
@@ -911,6 +1222,65 @@ func UpdateAgentModel(agentName AgentName, modelID models.ModelID) error {
 			config.Agents = make(map[AgentName]Agent)
 		}
 		config.Agents[agentName] = newAgentCfg
+	})
+}
+
+func updateAgentConfig(agentName AgentName, mutate func(agent *Agent)) error {
+	if cfg == nil {
+		return fmt.Errorf("config not loaded")
+	}
+
+	if cfg.Agents == nil {
+		cfg.Agents = make(map[AgentName]Agent)
+	}
+
+	existingAgentCfg := cfg.Agents[agentName]
+	updatedAgent := existingAgentCfg
+	mutate(&updatedAgent)
+
+	cfg.Agents[agentName] = updatedAgent
+	if err := validateAgent(cfg, agentName, updatedAgent); err != nil {
+		cfg.Agents[agentName] = existingAgentCfg
+		return fmt.Errorf("failed to update agent config: %w", err)
+	}
+
+	validatedAgent := cfg.Agents[agentName]
+
+	return updateCfgFile(func(config *Config) {
+		if config.Agents == nil {
+			config.Agents = make(map[AgentName]Agent)
+		}
+		config.Agents[agentName] = validatedAgent
+	})
+}
+
+func UpdateAgentTemperature(agentName AgentName, value *float64) error {
+	return updateAgentConfig(agentName, func(agent *Agent) {
+		agent.Temperature = value
+	})
+}
+
+func UpdateAgentTopK(agentName AgentName, value *int64) error {
+	return updateAgentConfig(agentName, func(agent *Agent) {
+		agent.TopK = value
+	})
+}
+
+func UpdateAgentNumCtx(agentName AgentName, value *int64) error {
+	return updateAgentConfig(agentName, func(agent *Agent) {
+		agent.NumCtx = value
+	})
+}
+
+func UpdateAgentMinP(agentName AgentName, value *float64) error {
+	return updateAgentConfig(agentName, func(agent *Agent) {
+		agent.MinP = value
+	})
+}
+
+func UpdateAgentRepeatPenalty(agentName AgentName, value *float64) error {
+	return updateAgentConfig(agentName, func(agent *Agent) {
+		agent.RepeatPenalty = value
 	})
 }
 

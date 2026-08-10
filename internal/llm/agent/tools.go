@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 
+	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/history"
 	"github.com/opencode-ai/opencode/internal/llm/tools"
 	"github.com/opencode-ai/opencode/internal/lsp"
@@ -23,6 +24,7 @@ func CoderAgentTools(
 	if len(lspClients) > 0 {
 		otherTools = append(otherTools, tools.NewDiagnosticsTool(lspClients))
 	}
+	pythonTools := tools.NewConfiguredPythonTools(config.Get(), permissions)
 	return append(
 		[]tools.BaseTool{
 			tools.NewBashTool(permissions),
@@ -36,7 +38,7 @@ func CoderAgentTools(
 			tools.NewPatchTool(lspClients, permissions, history),
 			tools.NewWriteTool(lspClients, permissions, history),
 			NewAgentTool(sessions, messages, lspClients),
-		}, otherTools...,
+		}, append(pythonTools, otherTools...)...,
 	)
 }
 

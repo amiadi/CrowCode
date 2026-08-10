@@ -86,18 +86,18 @@ func (m *sidebarCmp) View() string {
 
 	return baseStyle.
 		Width(m.width).
-		PaddingLeft(4).
-		PaddingRight(2).
+		PaddingLeft(1).
+		PaddingRight(1).
 		Height(m.height - 1).
 		Render(
 			lipgloss.JoinVertical(
 				lipgloss.Top,
 				header(m.width),
-				" ",
+				"",
 				m.sessionSection(),
-				" ",
+				"",
 				lspsConfigured(m.width),
-				" ",
+				"",
 				m.modifiedFiles(),
 			),
 		)
@@ -107,20 +107,25 @@ func (m *sidebarCmp) sessionSection() string {
 	t := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
 
-	sessionKey := baseStyle.
-		Foreground(t.Primary()).
-		Bold(true).
-		Render("Session")
+	title := styles.Bold().Render("Session")
 
-	sessionValue := baseStyle.
-		Foreground(t.Text()).
-		Width(m.width - lipgloss.Width(sessionKey)).
-		Render(fmt.Sprintf(": %s", m.session.Title))
+	sessionName := m.session.Title
+	if strings.TrimSpace(sessionName) == "" {
+		sessionName = "No active session"
+	}
 
-	return lipgloss.JoinHorizontal(
+	sessionValue := baseStyle.Foreground(t.Text()).Render(sessionName)
+
+	idLine := baseStyle.Foreground(t.TextMuted()).Render("ID: -")
+	if m.session.ID != "" {
+		idLine = baseStyle.Foreground(t.TextMuted()).Render(fmt.Sprintf("ID: %s", m.session.ID[:min(8, len(m.session.ID))]))
+	}
+
+	return lipgloss.JoinVertical(
 		lipgloss.Left,
-		sessionKey,
+		title,
 		sessionValue,
+		idLine,
 	)
 }
 
@@ -173,21 +178,17 @@ func (m *sidebarCmp) modifiedFiles() string {
 	t := theme.CurrentTheme()
 	baseStyle := styles.BaseStyle()
 
-	modifiedFiles := baseStyle.
-		Width(m.width).
-		Foreground(t.Primary()).
-		Bold(true).
-		Render("Modified Files:")
+	modifiedFiles := styles.Bold().Render("Modified Files")
 
 	// If no modified files, show a placeholder message
 	if m.modFiles == nil || len(m.modFiles) == 0 {
 		message := "No modified files"
-		remainingWidth := m.width - lipgloss.Width(message)
+		remainingWidth := m.width - lipgloss.Width(message) - 4
 		if remainingWidth > 0 {
 			message += strings.Repeat(" ", remainingWidth)
 		}
 		return baseStyle.
-			Width(m.width).
+			Width(max(0, m.width-2)).
 			Render(
 				lipgloss.JoinVertical(
 					lipgloss.Top,
@@ -212,7 +213,7 @@ func (m *sidebarCmp) modifiedFiles() string {
 	}
 
 	return baseStyle.
-		Width(m.width).
+		Width(max(0, m.width-2)).
 		Render(
 			lipgloss.JoinVertical(
 				lipgloss.Top,

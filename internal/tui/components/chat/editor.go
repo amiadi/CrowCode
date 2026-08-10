@@ -219,29 +219,30 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *editorCmp) View() string {
 	t := theme.CurrentTheme()
 
-	// Style the prompt with theme colors
-	style := lipgloss.NewStyle().
-		Padding(0, 0, 0, 1).
-		Bold(true).
-		Foreground(t.Primary())
+	promptStyle := styles.Padded().
+		Background(t.Secondary()).
+		Foreground(t.Background()).
+		Bold(true)
+
+	composer := lipgloss.JoinHorizontal(lipgloss.Top, promptStyle.Render("Ask"), " ", m.textarea.View())
+	hints := m.editorHints()
 
 	if len(m.attachments) == 0 {
-		return lipgloss.JoinHorizontal(lipgloss.Top, style.Render(">"), m.textarea.View())
+		return lipgloss.JoinVertical(lipgloss.Left, composer, hints)
 	}
 	m.textarea.SetHeight(m.height - 1)
 	return lipgloss.JoinVertical(lipgloss.Top,
 		m.attachmentsContent(),
-		lipgloss.JoinHorizontal(lipgloss.Top, style.Render(">"),
-			m.textarea.View()),
+		composer,
+		hints,
 	)
 }
 
 func (m *editorCmp) SetSize(width, height int) tea.Cmd {
 	m.width = width
 	m.height = height
-	m.textarea.SetWidth(width - 3) // account for the prompt and padding right
-	m.textarea.SetHeight(height)
-	m.textarea.SetWidth(width)
+	m.textarea.SetWidth(max(0, width-8))
+	m.textarea.SetHeight(max(1, height-1))
 	return nil
 }
 
@@ -252,24 +253,43 @@ func (m *editorCmp) GetSize() (int, int) {
 func (m *editorCmp) attachmentsContent() string {
 	var styledAttachments []string
 	t := theme.CurrentTheme()
-	attachmentStyles := styles.BaseStyle().
-		MarginLeft(1).
-		Background(t.TextMuted()).
+	attachmentStyle := styles.Padded().
+		Background(t.BackgroundDarker()).
 		Foreground(t.Text())
 	for i, attachment := range m.attachments {
 		var filename string
 		if len(attachment.FileName) > 10 {
-			filename = fmt.Sprintf(" %s %s...", styles.DocumentIcon, attachment.FileName[0:7])
+			filename = fmt.Sprintf("%s %s...", styles.DocumentIcon, attachment.FileName[0:7])
 		} else {
-			filename = fmt.Sprintf(" %s %s", styles.DocumentIcon, attachment.FileName)
+			filename = fmt.Sprintf("%s %s", styles.DocumentIcon, attachment.FileName)
 		}
 		if m.deleteMode {
-			filename = fmt.Sprintf("%d%s", i, filename)
+			filename = fmt.Sprintf("%d:%s", i, filename)
 		}
-		styledAttachments = append(styledAttachments, attachmentStyles.Render(filename))
+		styledAttachments = append(styledAttachments, attachmentStyle.Render(filename))
 	}
 	content := lipgloss.JoinHorizontal(lipgloss.Left, styledAttachments...)
+	if m.deleteMode {
+		deleteHint := styles.BaseStyle().Foreground(t.Warning()).Render("  delete mode: type index or r")
+		content = lipgloss.JoinHorizontal(lipgloss.Left, content, deleteHint)
+	}
 	return content
+}
+
+func (m *editorCmp) editorHints() string {
+	t := theme.CurrentTheme()
+	keyStyle := styles.Padded().
+		Background(t.BackgroundSecondary()).
+		Foreground(t.TextMuted())
+
+	return lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		keyStyle.Render("Enter send"),
+		" ",
+		keyStyle.Render("\\ + Enter newline"),
+		" ",
+		keyStyle.Render("Ctrl+E editor"),
+	)
 }
 
 func (m *editorCmp) BindingKeys() []key.Binding {

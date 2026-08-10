@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/opencode-ai/opencode/internal/config"
+	"github.com/opencode-ai/opencode/internal/db"
 	"github.com/opencode-ai/opencode/internal/llm/models"
 	"github.com/opencode-ai/opencode/internal/llm/prompt"
 	"github.com/opencode-ai/opencode/internal/llm/provider"
@@ -17,6 +19,7 @@ import (
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/permission"
 	"github.com/opencode-ai/opencode/internal/pubsub"
+	"github.com/opencode-ai/opencode/internal/rag"
 	"github.com/opencode-ai/opencode/internal/session"
 )
 
@@ -43,6 +46,17 @@ type AgentEvent struct {
 	SessionID string
 	Progress  string
 	Done      bool
+}
+
+type SummaryState struct {
+	ConversationSummary string   `json:"conversation_summary"`
+	CurrentFocus        string   `json:"current_focus"`
+	Decisions           []string `json:"decisions"`
+	CompletedTasks      []string `json:"completed_tasks"`
+	PendingTasks        []string `json:"pending_tasks"`
+	Risks               []string `json:"risks"`
+	NextAction          string   `json:"next_action"`
+	FilesTouched        []string `json:"files_touched"`
 }
 
 type Service interface {
@@ -266,7 +280,15 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		}
 	}
 
-	userMsg, err := a.createUserMessage(ctx, sessionID, content, attachmentParts)
+	enrichedContent := content
+	enriched, ragErr := a.injectRAGContext(ctx, content)
+	if ragErr != nil {
+		logging.Warn("failed to inject rag context", "error", ragErr)
+	} else {
+		enrichedContent = enriched
+	}
+
+	userMsg, err := a.createUserMessage(ctx, sessionID, enrichedContent, attachmentParts)
 	if err != nil {
 		return a.err(fmt.Errorf("failed to create user message: %w", err))
 	}
@@ -479,6 +501,11 @@ func (a *agent) processEvent(ctx context.Context, sessionID string, assistantMsg
 		}
 		logging.ErrorPersist(event.Error.Error())
 		return event.Error
+	case provider.EventWarning:
+		if strings.TrimSpace(event.Content) != "" {
+			logging.WarnPersist(event.Content)
+		}
+		return nil
 	case provider.EventComplete:
 		assistantMsg.SetToolCalls(event.Response.ToolCalls)
 		assistantMsg.AddFinish(event.Response.FinishReason)
@@ -586,8 +613,8 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 		}
 		a.Publish(pubsub.CreatedEvent, event)
 
-		// Add a system message to guide the summarization
-		summarizePrompt := "Provide a detailed but concise summary of our conversation above. Focus on information that would be helpful for continuing the conversation, including what we did, what we're doing, which files we're working on, and what we're going to do next."
+		// Ask for strict structured output so summary state can be reused deterministically.
+		summarizePrompt := "Summarize the conversation above as strict JSON using the schema from your system prompt. Return JSON only."
 
 		// Create a new message with the summarize prompt
 		promptMsg := message.Message{
@@ -621,16 +648,18 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 			return
 		}
 
-		summary := strings.TrimSpace(response.Content)
-		if summary == "" {
+		summaryState, err := parseSummaryState(response.Content)
+		if err != nil {
 			event = AgentEvent{
 				Type:  AgentEventTypeError,
-				Error: fmt.Errorf("empty summary returned"),
+				Error: fmt.Errorf("failed to parse structured summary: %w", err),
 				Done:  true,
 			}
 			a.Publish(pubsub.CreatedEvent, event)
 			return
 		}
+
+		summary := renderSummaryState(summaryState)
 		event = AgentEvent{
 			Type:     AgentEventTypeSummarize,
 			Progress: "Creating new session...",
@@ -671,6 +700,8 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 			return
 		}
 		oldSession.SummaryMessageID = msg.ID
+		summaryStateJSON, _ := json.Marshal(summaryState)
+		oldSession.SummaryState = string(summaryStateJSON)
 		oldSession.CompletionTokens = response.Usage.OutputTokens
 		oldSession.PromptTokens = 0
 		model := a.summarizeProvider.Model()
@@ -701,6 +732,163 @@ func (a *agent) Summarize(ctx context.Context, sessionID string) error {
 	}()
 
 	return nil
+}
+
+func parseSummaryState(raw string) (SummaryState, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return SummaryState{}, fmt.Errorf("empty summary")
+	}
+
+	jsonBlob := trimmed
+	if !strings.HasPrefix(trimmed, "{") {
+		start := strings.Index(trimmed, "{")
+		end := strings.LastIndex(trimmed, "}")
+		if start == -1 || end == -1 || end <= start {
+			return SummaryState{}, fmt.Errorf("no json object found in summary")
+		}
+		jsonBlob = trimmed[start : end+1]
+	}
+
+	var state SummaryState
+	if err := json.Unmarshal([]byte(jsonBlob), &state); err != nil {
+		return SummaryState{}, err
+	}
+
+	if strings.TrimSpace(state.ConversationSummary) == "" {
+		return SummaryState{}, fmt.Errorf("conversation_summary is required")
+	}
+	if strings.TrimSpace(state.NextAction) == "" {
+		return SummaryState{}, fmt.Errorf("next_action is required")
+	}
+
+	if state.Decisions == nil {
+		state.Decisions = []string{}
+	}
+	if state.CompletedTasks == nil {
+		state.CompletedTasks = []string{}
+	}
+	if state.PendingTasks == nil {
+		state.PendingTasks = []string{}
+	}
+	if state.Risks == nil {
+		state.Risks = []string{}
+	}
+	if state.FilesTouched == nil {
+		state.FilesTouched = []string{}
+	}
+
+	return state, nil
+}
+
+func renderSummaryState(state SummaryState) string {
+	formatList := func(title string, items []string) string {
+		if len(items) == 0 {
+			return fmt.Sprintf("%s\n- none", title)
+		}
+		lines := make([]string, 0, len(items)+1)
+		lines = append(lines, title)
+		for _, item := range items {
+			if strings.TrimSpace(item) == "" {
+				continue
+			}
+			lines = append(lines, "- "+item)
+		}
+		if len(lines) == 1 {
+			lines = append(lines, "- none")
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	sections := []string{
+		"Mission Summary\n" + strings.TrimSpace(state.ConversationSummary),
+		"Current Focus\n" + strings.TrimSpace(state.CurrentFocus),
+		formatList("Decisions", state.Decisions),
+		formatList("Completed Tasks", state.CompletedTasks),
+		formatList("Pending Tasks", state.PendingTasks),
+		formatList("Risks", state.Risks),
+		formatList("Files Touched", state.FilesTouched),
+		"Next Action\n" + strings.TrimSpace(state.NextAction),
+	}
+
+	return strings.Join(sections, "\n\n")
+}
+
+func (a *agent) injectRAGContext(ctx context.Context, userContent string) (string, error) {
+	cfg := config.Get()
+	if cfg == nil || !cfg.RAG.Enabled {
+		return userContent, nil
+	}
+	if strings.TrimSpace(userContent) == "" {
+		return userContent, nil
+	}
+
+	searchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	conn, err := db.Connect()
+	if err != nil {
+		return userContent, err
+	}
+	defer conn.Close()
+
+	ragService := rag.NewServiceFromConfig(db.New(conn), cfg.RAG)
+	results, err := ragService.HybridSearch(searchCtx, userContent, cfg.RAG.TopK)
+	if err != nil {
+		return userContent, err
+	}
+	if len(results) == 0 {
+		return userContent, nil
+	}
+
+	retrievedBlock, count := buildRetrievedContextBlock(results, cfg.RAG)
+	if count == 0 {
+		return userContent, nil
+	}
+
+	enriched := fmt.Sprintf("%s\n\n%s", userContent, retrievedBlock)
+	return enriched, nil
+}
+
+func buildRetrievedContextBlock(results []rag.HybridResult, ragCfg config.RAGConfig) (string, int) {
+	maxChars := ragCfg.MaxContextChars
+	if maxChars <= 0 {
+		maxChars = 3200
+	}
+
+	builder := strings.Builder{}
+	builder.WriteString("Retrieved context (include citations when used):\n")
+	builder.WriteString("Citation policy:\n")
+	builder.WriteString("1. Any factual claim derived from retrieved context MUST include an inline citation token in this format: [SRC:<source_id>|DOC:<external_id>|CHUNK:<chunk_index>].\n")
+	builder.WriteString("2. End each answer that uses retrieved context with a 'Citations' section listing each unique citation token used.\n")
+	builder.WriteString("3. If no retrieved context is used in the final answer, state: 'Citations: none'.\n")
+	builder.WriteString("\nRetrieved snippets:\n")
+
+	used := 0
+	count := 0
+	for _, result := range results {
+		if result.HybridScore < ragCfg.MinScore {
+			continue
+		}
+		chunk := strings.TrimSpace(strings.ReplaceAll(result.Chunk.Content, "\n", " "))
+		if chunk == "" {
+			continue
+		}
+		if len(chunk) > 600 {
+			chunk = chunk[:600] + "..."
+		}
+
+		citation := fmt.Sprintf("[SRC:%s|DOC:%s|CHUNK:%d]", result.Chunk.SourceID, result.Chunk.ExternalID, result.Chunk.ChunkIndex)
+		line := fmt.Sprintf("- %s score=%.3f %s\n", citation, result.HybridScore, chunk)
+		if used+len(line) > maxChars {
+			break
+		}
+		builder.WriteString(line)
+		used += len(line)
+		count++
+	}
+
+	return builder.String(), count
 }
 
 func createAgentProvider(agentName config.AgentName) (provider.Provider, error) {
@@ -736,6 +924,13 @@ func createAgentProvider(agentName config.AgentName) (provider.Provider, error) 
 			opts,
 			provider.WithOpenAIOptions(
 				provider.WithReasoningEffort(agentConfig.ReasoningEffort),
+				provider.WithOpenAITemperature(agentConfig.Temperature),
+				provider.WithOpenAITopP(agentConfig.TopP),
+				provider.WithOpenAIMinP(agentConfig.MinP),
+				provider.WithOpenAITopK(agentConfig.TopK),
+				provider.WithOpenAINumCtx(agentConfig.NumCtx),
+				provider.WithOpenAIRepeatPenalty(agentConfig.RepeatPenalty),
+				provider.WithOpenAISeed(agentConfig.Seed),
 			),
 		)
 	} else if model.Provider == models.ProviderAnthropic && model.CanReason && agentName == config.AgentCoder {

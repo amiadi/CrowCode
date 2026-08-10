@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/openai/openai-go"
@@ -23,6 +25,13 @@ type openaiOptions struct {
 	disableCache    bool
 	reasoningEffort string
 	extraHeaders    map[string]string
+	temperature     *float64
+	topP            *float64
+	minP            *float64
+	topK            *int64
+	numCtx          *int64
+	repeatPenalty   *float64
+	seed            *int64
 }
 
 type OpenAIOption func(*openaiOptions)
@@ -34,6 +43,8 @@ type openaiClient struct {
 }
 
 type OpenAIClient ProviderClient
+
+var localModelNoToolsCache sync.Map
 
 func newOpenAIClient(opts providerClientOptions) OpenAIClient {
 	openaiOpts := openaiOptions{
@@ -166,6 +177,22 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 		Tools:    tools,
 	}
 
+	if o.options.temperature != nil {
+		params.Temperature = openai.Float(*o.options.temperature)
+	}
+	if o.options.topP != nil {
+		params.TopP = openai.Float(*o.options.topP)
+	}
+	if o.options.seed != nil {
+		params.Seed = openai.Int(*o.options.seed)
+	}
+
+	// Local OpenAI-compatible backends (for example Ollama) may reject reasoning fields.
+	if o.providerOptions.model.Provider == models.ProviderLocal {
+		params.MaxTokens = openai.Int(o.providerOptions.maxTokens)
+		return params
+	}
+
 	if o.providerOptions.model.CanReason == true {
 		params.MaxCompletionTokens = openai.Int(o.providerOptions.maxTokens)
 		switch o.options.reasoningEffort {
@@ -185,8 +212,53 @@ func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessagePar
 	return params
 }
 
+func (o *openaiClient) requestOptions() []option.RequestOption {
+	if o.providerOptions.model.Provider != models.ProviderLocal {
+		return nil
+	}
+
+	requestOptions := []option.RequestOption{}
+	if o.options.minP != nil {
+		requestOptions = append(requestOptions,
+			option.WithJSONSet("min_p", *o.options.minP),
+			option.WithJSONSet("options.min_p", *o.options.minP),
+		)
+	}
+	if o.options.topK != nil {
+		requestOptions = append(requestOptions,
+			option.WithJSONSet("top_k", *o.options.topK),
+			option.WithJSONSet("options.top_k", *o.options.topK),
+		)
+	}
+	if o.options.numCtx != nil {
+		requestOptions = append(requestOptions,
+			option.WithJSONSet("num_ctx", *o.options.numCtx),
+			option.WithJSONSet("options.num_ctx", *o.options.numCtx),
+		)
+	}
+	if o.options.repeatPenalty != nil {
+		requestOptions = append(requestOptions,
+			option.WithJSONSet("repeat_penalty", *o.options.repeatPenalty),
+			option.WithJSONSet("options.repeat_penalty", *o.options.repeatPenalty),
+		)
+	}
+
+	return requestOptions
+}
+
 func (o *openaiClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
-	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
+	requestMessages := messages
+	convertedMessages := o.convertMessages(requestMessages)
+	convertedTools := o.convertTools(tools)
+	if o.providerOptions.model.Provider == models.ProviderLocal && localModelHasNoTools(o.providerOptions.model) && len(convertedTools) > 0 {
+		logging.WarnPersist(fmt.Sprintf("Model %s does not support tools; running without tools", o.providerOptions.model.APIModel))
+		requestMessages = sanitizeMessagesForNoTools(requestMessages)
+		convertedMessages = o.convertMessages(requestMessages)
+		convertedTools = nil
+	}
+	params := o.preparedParams(convertedMessages, convertedTools)
+	requestOptions := o.requestOptions()
+	triedWithoutTools := false
 	cfg := config.Get()
 	if cfg.Debug {
 		jsonData, _ := json.Marshal(params)
@@ -198,9 +270,20 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 		openaiResponse, err := o.client.Chat.Completions.New(
 			ctx,
 			params,
+			requestOptions...,
 		)
 		// If there is an error we are going to see if we can retry the call
 		if err != nil {
+			if o.providerOptions.model.Provider == models.ProviderLocal && len(convertedTools) > 0 && !triedWithoutTools && isUnsupportedToolsError(err) {
+				markLocalModelNoTools(o.providerOptions.model)
+				logging.WarnPersist(fmt.Sprintf("Model %s does not support tools; retrying without tools", o.providerOptions.model.APIModel))
+				requestMessages = sanitizeMessagesForNoTools(messages)
+				convertedMessages = o.convertMessages(requestMessages)
+				params = o.preparedParams(convertedMessages, nil)
+				triedWithoutTools = true
+				continue
+			}
+
 			retry, after, retryErr := o.shouldRetry(attempts, err)
 			if retryErr != nil {
 				return nil, retryErr
@@ -239,10 +322,20 @@ func (o *openaiClient) send(ctx context.Context, messages []message.Message, too
 }
 
 func (o *openaiClient) stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
-	params := o.preparedParams(o.convertMessages(messages), o.convertTools(tools))
-	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
-		IncludeUsage: openai.Bool(true),
+	requestMessages := messages
+	convertedMessages := o.convertMessages(requestMessages)
+	convertedTools := o.convertTools(tools)
+	disabledByCache := false
+	if o.providerOptions.model.Provider == models.ProviderLocal && localModelHasNoTools(o.providerOptions.model) && len(convertedTools) > 0 {
+		disabledByCache = true
+		requestMessages = sanitizeMessagesForNoTools(requestMessages)
+		convertedMessages = o.convertMessages(requestMessages)
+		convertedTools = nil
 	}
+	params := o.preparedParams(convertedMessages, convertedTools)
+	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
+	requestOptions := o.requestOptions()
+	triedWithoutTools := false
 
 	cfg := config.Get()
 	if cfg.Debug {
@@ -254,11 +347,20 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 	eventChan := make(chan ProviderEvent)
 
 	go func() {
+		if disabledByCache {
+			eventChan <- ProviderEvent{
+				Type:    EventWarning,
+				Content: fmt.Sprintf("Model %s does not support tools. Tools are disabled for this model.", o.providerOptions.model.APIModel),
+			}
+		}
+
 		for {
 			attempts++
+			params.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
 			openaiStream := o.client.Chat.Completions.NewStreaming(
 				ctx,
 				params,
+				requestOptions...,
 			)
 
 			acc := openai.ChatCompletionAccumulator{}
@@ -305,6 +407,19 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			}
 
 			// If there is an error we are going to see if we can retry the call
+			if o.providerOptions.model.Provider == models.ProviderLocal && len(convertedTools) > 0 && !triedWithoutTools && isUnsupportedToolsError(err) {
+				markLocalModelNoTools(o.providerOptions.model)
+				eventChan <- ProviderEvent{
+					Type:    EventWarning,
+					Content: fmt.Sprintf("Model %s does not support tools. Retrying without tools.", o.providerOptions.model.APIModel),
+				}
+				requestMessages = sanitizeMessagesForNoTools(messages)
+				convertedMessages = o.convertMessages(requestMessages)
+				params = o.preparedParams(convertedMessages, nil)
+				triedWithoutTools = true
+				continue
+			}
+
 			retry, after, retryErr := o.shouldRetry(attempts, err)
 			if retryErr != nil {
 				eventChan <- ProviderEvent{Type: EventError, Error: retryErr}
@@ -332,6 +447,70 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 	}()
 
 	return eventChan
+}
+
+func isUnsupportedToolsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "does not support tools") ||
+		strings.Contains(msg, "tool is not supported") ||
+		strings.Contains(msg, "tools are not supported")
+}
+
+func localModelHasNoTools(model models.Model) bool {
+	if model.Provider != models.ProviderLocal {
+		return false
+	}
+	_, ok := localModelNoToolsCache.Load(localModelCapabilityKey(model))
+	return ok
+}
+
+func markLocalModelNoTools(model models.Model) {
+	if model.Provider != models.ProviderLocal {
+		return
+	}
+	localModelNoToolsCache.Store(localModelCapabilityKey(model), true)
+}
+
+func localModelCapabilityKey(model models.Model) string {
+	apiModel := strings.TrimSpace(model.APIModel)
+	if apiModel != "" {
+		return strings.ToLower(apiModel)
+	}
+	return strings.ToLower(string(model.ID))
+}
+
+func sanitizeMessagesForNoTools(messages []message.Message) []message.Message {
+	out := make([]message.Message, 0, len(messages))
+	for _, msg := range messages {
+		if msg.Role == message.Tool {
+			continue
+		}
+
+		filtered := msg
+		filtered.Parts = make([]message.ContentPart, 0, len(msg.Parts))
+		for _, part := range msg.Parts {
+			switch part.(type) {
+			case message.ToolCall, message.ToolResult:
+				continue
+			default:
+				filtered.Parts = append(filtered.Parts, part)
+			}
+		}
+
+		if filtered.Role == message.Assistant && strings.TrimSpace(filtered.Content().String()) == "" {
+			continue
+		}
+
+		if filtered.Role == message.User && strings.TrimSpace(filtered.Content().String()) == "" && len(filtered.BinaryContent()) == 0 && len(filtered.ImageURLContent()) == 0 {
+			continue
+		}
+
+		out = append(out, filtered)
+	}
+	return out
 }
 
 func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error) {
@@ -421,5 +600,47 @@ func WithReasoningEffort(effort string) OpenAIOption {
 			logging.Warn("Invalid reasoning effort, using default: medium")
 		}
 		options.reasoningEffort = defaultReasoningEffort
+	}
+}
+
+func WithOpenAITemperature(value *float64) OpenAIOption {
+	return func(options *openaiOptions) {
+		options.temperature = value
+	}
+}
+
+func WithOpenAITopP(value *float64) OpenAIOption {
+	return func(options *openaiOptions) {
+		options.topP = value
+	}
+}
+
+func WithOpenAIMinP(value *float64) OpenAIOption {
+	return func(options *openaiOptions) {
+		options.minP = value
+	}
+}
+
+func WithOpenAITopK(value *int64) OpenAIOption {
+	return func(options *openaiOptions) {
+		options.topK = value
+	}
+}
+
+func WithOpenAINumCtx(value *int64) OpenAIOption {
+	return func(options *openaiOptions) {
+		options.numCtx = value
+	}
+}
+
+func WithOpenAIRepeatPenalty(value *float64) OpenAIOption {
+	return func(options *openaiOptions) {
+		options.repeatPenalty = value
+	}
+}
+
+func WithOpenAISeed(value *int64) OpenAIOption {
+	return func(options *openaiOptions) {
+		options.seed = value
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -239,15 +240,24 @@ func (m *messagesCmp) renderView() {
 		}
 	}
 
+	if len(m.uiMessages) == 0 && len(m.messages) > 0 {
+		fallback := make([]string, 0, len(m.messages))
+		for _, msg := range m.messages {
+			content := strings.TrimSpace(msg.Content().String())
+			if content == "" {
+				continue
+			}
+			fallback = append(fallback, fmt.Sprintf("%s: %s", msg.Role, content))
+		}
+		m.viewport.SetContent(baseStyle.Width(m.width).Render(strings.Join(fallback, "\n\n")))
+		return
+	}
+
 	messages := make([]string, 0)
+	gap := baseStyle.Width(m.width).Render("")
 	for _, v := range m.uiMessages {
-		messages = append(messages, lipgloss.JoinVertical(lipgloss.Left, v.content),
-			baseStyle.
-				Width(m.width).
-				Render(
-					"",
-				),
-		)
+		messages = append(messages, lipgloss.JoinVertical(lipgloss.Left, v.content))
+		messages = append(messages, gap)
 	}
 
 	m.viewport.SetContent(
@@ -264,6 +274,25 @@ func (m *messagesCmp) renderView() {
 
 func (m *messagesCmp) View() string {
 	baseStyle := styles.BaseStyle()
+	working := m.working()
+	help := m.help()
+	footerRows := []string{}
+	if working != "" {
+		footerRows = append(footerRows, working)
+	}
+	if help != "" {
+		footerRows = append(footerRows, help)
+	}
+	footer := ""
+	if len(footerRows) > 0 {
+		footer = lipgloss.JoinVertical(lipgloss.Top, footerRows...)
+	}
+
+	viewportHeight := m.height - lipgloss.Height(footer)
+	if viewportHeight < 1 {
+		viewportHeight = 1
+	}
+	m.viewport.Height = viewportHeight
 
 	if m.rendering {
 		return baseStyle.
@@ -272,15 +301,20 @@ func (m *messagesCmp) View() string {
 				lipgloss.JoinVertical(
 					lipgloss.Top,
 					"Loading...",
-					m.working(),
-					m.help(),
+					working,
+					help,
 				),
 			)
 	}
 	if len(m.messages) == 0 {
+		helpHeight := lipgloss.Height(help)
+		contentHeight := m.height - helpHeight
+		if contentHeight < 1 {
+			contentHeight = 1
+		}
 		content := baseStyle.
 			Width(m.width).
-			Height(m.height - 1).
+			Height(contentHeight).
 			Render(
 				m.initialScreen(),
 			)
@@ -292,9 +326,15 @@ func (m *messagesCmp) View() string {
 					lipgloss.Top,
 					content,
 					"",
-					m.help(),
+					help,
 				),
 			)
+	}
+
+	if footer == "" {
+		return baseStyle.
+			Width(m.width).
+			Render(m.viewport.View())
 	}
 
 	return baseStyle.
@@ -303,8 +343,7 @@ func (m *messagesCmp) View() string {
 			lipgloss.JoinVertical(
 				lipgloss.Top,
 				m.viewport.View(),
-				m.working(),
-				m.help(),
+				footer,
 			),
 		)
 }
@@ -349,7 +388,6 @@ func (m *messagesCmp) working() string {
 	text := ""
 	if m.IsAgentWorking() && len(m.messages) > 0 {
 		t := theme.CurrentTheme()
-		baseStyle := styles.BaseStyle()
 
 		task := "Thinking..."
 		lastMessage := m.messages[len(m.messages)-1]
@@ -361,11 +399,12 @@ func (m *messagesCmp) working() string {
 			task = "Generating..."
 		}
 		if task != "" {
-			text += baseStyle.
-				Width(m.width).
+			activity := styles.Padded().
+				Background(t.BackgroundSecondary()).
 				Foreground(t.Primary()).
 				Bold(true).
-				Render(fmt.Sprintf("%s %s ", m.spinner.View(), task))
+				Render(fmt.Sprintf("%s %s", m.spinner.View(), task))
+			text += styles.BaseStyle().Width(m.width).Render(activity)
 		}
 	}
 	return text
@@ -380,19 +419,16 @@ func (m *messagesCmp) help() string {
 	if m.app.CoderAgent.IsBusy() {
 		text += lipgloss.JoinHorizontal(
 			lipgloss.Left,
-			baseStyle.Foreground(t.TextMuted()).Bold(true).Render("press "),
-			baseStyle.Foreground(t.Text()).Bold(true).Render("esc"),
-			baseStyle.Foreground(t.TextMuted()).Bold(true).Render(" to exit cancel"),
+			styles.Padded().Background(t.Warning()).Foreground(t.Background()).Render("Esc cancel run"),
 		)
 	} else {
 		text += lipgloss.JoinHorizontal(
 			lipgloss.Left,
-			baseStyle.Foreground(t.TextMuted()).Bold(true).Render("press "),
-			baseStyle.Foreground(t.Text()).Bold(true).Render("enter"),
-			baseStyle.Foreground(t.TextMuted()).Bold(true).Render(" to send the message,"),
-			baseStyle.Foreground(t.TextMuted()).Bold(true).Render(" write"),
-			baseStyle.Foreground(t.Text()).Bold(true).Render(" \\"),
-			baseStyle.Foreground(t.TextMuted()).Bold(true).Render(" and enter to add a new line"),
+			styles.Padded().Render("Enter send"),
+			" ",
+			styles.Padded().Render("\\ + Enter newline"),
+			" ",
+			styles.Padded().Render("@ completion"),
 		)
 	}
 	return baseStyle.
@@ -427,7 +463,7 @@ func (m *messagesCmp) SetSize(width, height int) tea.Cmd {
 	m.width = width
 	m.height = height
 	m.viewport.Width = width
-	m.viewport.Height = height - 2
+	m.viewport.Height = max(1, height-1)
 	m.attachments.Width = width + 40
 	m.attachments.Height = 3
 	m.rerender()

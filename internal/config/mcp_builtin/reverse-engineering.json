@@ -1,0 +1,9 @@
+{
+  "name": "reverse_engineering",
+  "type": "stdio",
+  "command": "npx",
+  "args": [
+    "-y",
+    "@modelcontextprotocol/server-sequential-thinking"
+  ]
+}

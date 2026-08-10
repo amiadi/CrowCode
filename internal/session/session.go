@@ -17,6 +17,7 @@ type Session struct {
 	PromptTokens     int64
 	CompletionTokens int64
 	SummaryMessageID string
+	SummaryState     string
 	Cost             float64
 	CreatedAt        int64
 	UpdatedAt        int64
@@ -110,6 +111,10 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 			String: session.SummaryMessageID,
 			Valid:  session.SummaryMessageID != "",
 		},
+		SummaryState: sql.NullString{
+			String: session.SummaryState,
+			Valid:  session.SummaryState != "",
+		},
 		Cost: session.Cost,
 	})
 	if err != nil {
@@ -141,6 +146,7 @@ func (s service) fromDBItem(item db.Session) Session {
 		PromptTokens:     item.PromptTokens,
 		CompletionTokens: item.CompletionTokens,
 		SummaryMessageID: item.SummaryMessageID.String,
+		SummaryState:     item.SummaryState.String,
 		Cost:             item.Cost,
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,

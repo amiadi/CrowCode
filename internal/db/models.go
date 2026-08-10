@@ -40,4 +40,73 @@ type Session struct {
 	UpdatedAt        int64          `json:"updated_at"`
 	CreatedAt        int64          `json:"created_at"`
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
+	SummaryState     sql.NullString `json:"summary_state"`
+}
+
+type RagSource struct {
+	ID            string         `json:"id"`
+	SourceType    string         `json:"source_type"`
+	URI           string         `json:"uri"`
+	Name          string         `json:"name"`
+	Etag          sql.NullString `json:"etag"`
+	Checksum      sql.NullString `json:"checksum"`
+	Metadata      string         `json:"metadata"`
+	LastIndexedAt sql.NullInt64  `json:"last_indexed_at"`
+	UpdatedAt     int64          `json:"updated_at"`
+	CreatedAt     int64          `json:"created_at"`
+}
+
+type RagDocument struct {
+	ID          string         `json:"id"`
+	SourceID    string         `json:"source_id"`
+	ExternalID  string         `json:"external_id"`
+	Title       string         `json:"title"`
+	Metadata    string         `json:"metadata"`
+	ContentHash sql.NullString `json:"content_hash"`
+	UpdatedAt   int64          `json:"updated_at"`
+	CreatedAt   int64          `json:"created_at"`
+}
+
+type RagChunk struct {
+	ID             string         `json:"id"`
+	DocumentID     string         `json:"document_id"`
+	ChunkIndex     int64          `json:"chunk_index"`
+	Content        string         `json:"content"`
+	TokenCount     int64          `json:"token_count"`
+	Embedding      string         `json:"embedding"`
+	EmbeddingModel sql.NullString `json:"embedding_model"`
+	Metadata       string         `json:"metadata"`
+	UpdatedAt      int64          `json:"updated_at"`
+	CreatedAt      int64          `json:"created_at"`
+}
+
+type RagIngestionJob struct {
+	ID            string         `json:"id"`
+	SourceID      string         `json:"source_id"`
+	Status        string         `json:"status"`
+	Error         sql.NullString `json:"error"`
+	DocumentsSeen int64          `json:"documents_seen"`
+	ChunksCreated int64          `json:"chunks_created"`
+	StartedAt     sql.NullInt64  `json:"started_at"`
+	FinishedAt    sql.NullInt64  `json:"finished_at"`
+	CreatedAt     int64          `json:"created_at"`
+}
+
+type RagRetrievalLog struct {
+	ID        string        `json:"id"`
+	QueryText string        `json:"query_text"`
+	Strategy  string        `json:"strategy"`
+	TopK      int64         `json:"top_k"`
+	LatencyMs sql.NullInt64 `json:"latency_ms"`
+	Metadata  string        `json:"metadata"`
+	CreatedAt int64         `json:"created_at"`
+}
+
+type RagRetrievalLogResult struct {
+	LogID        string          `json:"log_id"`
+	ChunkID      string          `json:"chunk_id"`
+	Rank         int64           `json:"rank"`
+	LexicalScore sql.NullFloat64 `json:"lexical_score"`
+	VectorScore  sql.NullFloat64 `json:"vector_score"`
+	HybridScore  sql.NullFloat64 `json:"hybrid_score"`
 }

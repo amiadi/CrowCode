@@ -3,7 +3,11 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,10 +30,13 @@ import (
 
 type keyMap struct {
 	Logs          key.Binding
+	Workspace     key.Binding
 	Quit          key.Binding
 	Help          key.Binding
 	SwitchSession key.Binding
 	Commands      key.Binding
+	Sampling      key.Binding
+	Prompts       key.Binding
 	Filepicker    key.Binding
 	Models        key.Binding
 	SwitchTheme   key.Binding
@@ -38,13 +45,25 @@ type keyMap struct {
 type startCompactSessionMsg struct{}
 
 const (
-	quitKey = "q"
+	quitKey               = "q"
+	commandSetTemperature = "set_temperature"
+	commandSetTopK        = "set_top_k"
+	commandSetNumCtx      = "set_context_window"
+	commandSetMinP        = "set_min_p"
+	commandSetRepeat      = "set_repeat_penalty"
+	commandSetSystem      = "set_system_prompt"
+	commandSetSkills      = "set_skills_prompt"
+	commandSetAgentPrompt = "set_agent_prompt"
 )
 
 var keys = keyMap{
 	Logs: key.NewBinding(
 		key.WithKeys("ctrl+l"),
 		key.WithHelp("ctrl+l", "logs"),
+	),
+	Workspace: key.NewBinding(
+		key.WithKeys("ctrl+w"),
+		key.WithHelp("ctrl+w", "workspace"),
 	),
 
 	Quit: key.NewBinding(
@@ -64,6 +83,14 @@ var keys = keyMap{
 	Commands: key.NewBinding(
 		key.WithKeys("ctrl+k"),
 		key.WithHelp("ctrl+k", "commands"),
+	),
+	Sampling: key.NewBinding(
+		key.WithKeys("ctrl+g"),
+		key.WithHelp("ctrl+g", "model params"),
+	),
+	Prompts: key.NewBinding(
+		key.WithKeys("ctrl+p"),
+		key.WithHelp("ctrl+p", "prompt setup"),
 	),
 	Filepicker: key.NewBinding(
 		key.WithKeys("ctrl+f"),
@@ -127,6 +154,9 @@ type appModel struct {
 	showInitDialog bool
 	initDialog     dialog.InitDialogCmp
 
+	showSetupWizard bool
+	setupWizard     dialog.SetupWizardDialog
+
 	showFilepicker bool
 	filepicker     dialog.FilepickerCmp
 
@@ -136,8 +166,9 @@ type appModel struct {
 	showMultiArgumentsDialog bool
 	multiArgumentsDialog     dialog.MultiArgumentsDialogCmp
 
-	isCompacting      bool
-	compactingMessage string
+	isCompacting          bool
+	compactingMessage     string
+	autoCompactSkipWarned bool
 }
 
 func (a appModel) Init() tea.Cmd {
@@ -213,6 +244,9 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, filepickerCmd)
 
 		a.initDialog.SetSize(msg.Width, msg.Height)
+		if a.setupWizard != nil {
+			a.setupWizard.SetSize(msg.Width, msg.Height)
+		}
 
 		if a.showMultiArgumentsDialog {
 			a.multiArgumentsDialog.SetSize(msg.Width, msg.Height)
@@ -333,10 +367,33 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.isCompacting = false
 			return a, util.ReportInfo("Session summarization complete")
 		} else if payload.Done && payload.Type == agent.AgentEventTypeResponse && a.selectedSession.ID != "" {
+			if a.isCompacting || !config.Get().AutoCompact {
+				return a, nil
+			}
+
 			model := a.app.CoderAgent.Model()
 			contextWindow := model.ContextWindow
+			if contextWindow <= 0 {
+				logging.Warn("skipping auto-compact: invalid context window", "model", model.Name, "context_window", contextWindow)
+				if !a.autoCompactSkipWarned {
+					a.autoCompactSkipWarned = true
+					return a, util.ReportWarn(fmt.Sprintf("Auto-compact skipped: model %s has no valid context window metadata", model.Name))
+				}
+				return a, nil
+			}
+			a.autoCompactSkipWarned = false
+
 			tokens := a.selectedSession.CompletionTokens + a.selectedSession.PromptTokens
-			if (tokens >= int64(float64(contextWindow)*0.95)) && config.Get().AutoCompact {
+			if tokens <= 0 {
+				return a, nil
+			}
+
+			threshold := int64(float64(contextWindow) * 0.95)
+			if threshold <= 0 {
+				return a, nil
+			}
+
+			if tokens >= threshold {
 				return a, util.CmdHandler(startCompactSessionMsg{})
 			}
 		}
@@ -363,12 +420,76 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err != nil {
 			return a, util.ReportError(err)
 		}
+		a.autoCompactSkipWarned = false
 
 		return a, util.ReportInfo(fmt.Sprintf("Model changed to %s", model.Name))
 
 	case dialog.ShowInitDialogMsg:
 		a.showInitDialog = msg.Show
 		return a, nil
+
+	case dialog.SetupWizardSubmitMsg:
+		opts := msg.Options
+		return a, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 9*time.Second)
+			defer cancel()
+
+			probe, err := config.ProbeLocalConnection(ctx, opts.Endpoint)
+			if err != nil {
+				logging.Warn("Connection probe failed", "endpoint", opts.Endpoint, "error", err)
+			}
+
+			if err := config.ApplyConnectionSetup(opts); err != nil {
+				return util.InfoMsg{Type: util.InfoTypeError, Msg: "Failed to apply connection setup: " + err.Error()}
+			}
+
+			modelsInfo := ""
+			if len(probe.Models) > 0 {
+				sample := probe.Models
+				if len(sample) > 5 {
+					sample = sample[:5]
+				}
+				modelsInfo = fmt.Sprintf(" (models: %s)", strings.Join(sample, ", "))
+			}
+
+			return util.InfoMsg{
+				Type: util.InfoTypeInfo,
+				Msg:  fmt.Sprintf("Connection updated: %s -> %s%s", opts.Provider, opts.Endpoint, modelsInfo),
+			}
+		}
+
+	case dialog.CloseSetupWizardMsg:
+		a.showSetupWizard = false
+		return a, nil
+
+	case page.WorkspaceRunPromptMsg:
+		if a.app.CoderAgent.IsBusy() {
+			return a, util.ReportWarn("Agent is busy, please wait...")
+		}
+		if strings.TrimSpace(msg.Prompt) == "" {
+			return a, util.ReportWarn("Workspace action prompt is empty")
+		}
+
+		var cmds []tea.Cmd
+		if msg.SwitchToChat && a.currentPage != page.ChatPage {
+			cmds = append(cmds, a.moveToPage(page.ChatPage))
+		}
+
+		if a.selectedSession.ID == "" {
+			sess, err := a.app.Sessions.Create(context.Background(), "Workspace Session")
+			if err != nil {
+				return a, util.ReportError(err)
+			}
+			a.selectedSession = sess
+			cmds = append(cmds, util.CmdHandler(chat.SessionSelectedMsg(sess)))
+		}
+
+		_, err := a.app.CoderAgent.Run(context.Background(), a.selectedSession.ID, msg.Prompt)
+		if err != nil {
+			return a, util.ReportError(err)
+		}
+		cmds = append(cmds, util.ReportInfo("Workspace action queued in chat session"))
+		return a, tea.Batch(cmds...)
 
 	case dialog.CloseInitDialogMsg:
 		a.showInitDialog = false
@@ -394,6 +515,7 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case chat.SessionSelectedMsg:
 		a.selectedSession = msg
 		a.sessionDialog.SetSelectedSession(msg.ID)
+		a.autoCompactSkipWarned = false
 
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.UpdatedEvent && msg.Payload.ID == a.selectedSession.ID {
@@ -408,6 +530,13 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dialog.CommandSelectedMsg:
 		a.showCommandDialog = false
+		if msg.Command.ID == "setup_connection" {
+			a.showSetupWizard = true
+			if a.setupWizard != nil {
+				a.setupWizard.SetSize(a.width, a.height)
+			}
+			return a, a.setupWizard.Init()
+		}
 		// Execute the command handler if available
 		if msg.Command.Handler != nil {
 			return a, msg.Command.Handler(msg.Command)
@@ -426,6 +555,10 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// If submitted, replace all named arguments and run the command
 		if msg.Submit {
+			if cmd, handled := a.handleBuiltInArgumentCommand(msg); handled {
+				return a, cmd
+			}
+
 			content := msg.Content
 
 			// Replace each named argument with its value
@@ -443,6 +576,12 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.KeyMsg:
+		if a.showSetupWizard {
+			d, setupCmd := a.setupWizard.Update(msg)
+			a.setupWizard = d.(dialog.SetupWizardDialog)
+			return a, setupCmd
+		}
+
 		// If multi-arguments dialog is open, let it handle the key press first
 		if a.showMultiArgumentsDialog {
 			args, cmd := a.multiArgumentsDialog.Update(msg)
@@ -470,6 +609,9 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.showModelDialog {
 				a.showModelDialog = false
 			}
+			if a.showSetupWizard {
+				a.showSetupWizard = false
+			}
 			if a.showMultiArgumentsDialog {
 				a.showMultiArgumentsDialog = false
 			}
@@ -490,12 +632,34 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		case key.Matches(msg, keys.Commands):
-			if a.currentPage == page.ChatPage && !a.showQuit && !a.showPermissions && !a.showSessionDialog && !a.showThemeDialog && !a.showFilepicker {
+			if (a.currentPage == page.ChatPage || a.currentPage == page.WorkspacePage) && !a.showQuit && !a.showPermissions && !a.showSessionDialog && !a.showThemeDialog && !a.showFilepicker {
 				// Show commands dialog
 				if len(a.commands) == 0 {
 					return a, util.ReportWarn("No commands available")
 				}
 				a.commandDialog.SetCommands(a.commands)
+				a.showCommandDialog = true
+				return a, nil
+			}
+			return a, nil
+		case key.Matches(msg, keys.Sampling):
+			if (a.currentPage == page.ChatPage || a.currentPage == page.WorkspacePage) && !a.showQuit && !a.showPermissions && !a.showSessionDialog && !a.showThemeDialog && !a.showFilepicker {
+				samplingCommands := a.filterCommandsByIDs(commandSetTemperature, commandSetTopK, commandSetNumCtx, commandSetMinP, commandSetRepeat)
+				if len(samplingCommands) == 0 {
+					return a, util.ReportWarn("No model parameter commands available")
+				}
+				a.commandDialog.SetCommands(samplingCommands)
+				a.showCommandDialog = true
+				return a, nil
+			}
+			return a, nil
+		case key.Matches(msg, keys.Prompts):
+			if (a.currentPage == page.ChatPage || a.currentPage == page.WorkspacePage) && !a.showQuit && !a.showPermissions && !a.showSessionDialog && !a.showThemeDialog && !a.showFilepicker {
+				promptCommands := a.filterCommandsByIDs(commandSetSystem, commandSetSkills, commandSetAgentPrompt)
+				if len(promptCommands) == 0 {
+					return a, util.ReportWarn("No prompt commands available")
+				}
+				a.commandDialog.SetCommands(promptCommands)
 				a.showCommandDialog = true
 				return a, nil
 			}
@@ -520,7 +684,7 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		case key.Matches(msg, returnKey) || key.Matches(msg):
 			if msg.String() == quitKey {
-				if a.currentPage == page.LogsPage {
+				if a.currentPage == page.LogsPage || a.currentPage == page.WorkspacePage {
 					return a, a.moveToPage(page.ChatPage)
 				}
 			} else if !a.filepicker.IsCWDFocused() {
@@ -540,17 +704,23 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return a, nil
 				}
+				if a.showSetupWizard {
+					a.showSetupWizard = false
+					return a, nil
+				}
 				if a.showFilepicker {
 					a.showFilepicker = false
 					a.filepicker.ToggleFilepicker(a.showFilepicker)
 					return a, nil
 				}
-				if a.currentPage == page.LogsPage {
+				if a.currentPage == page.LogsPage || a.currentPage == page.WorkspacePage {
 					return a, a.moveToPage(page.ChatPage)
 				}
 			}
 		case key.Matches(msg, keys.Logs):
 			return a, a.moveToPage(page.LogsPage)
+		case key.Matches(msg, keys.Workspace):
+			return a, a.moveToPage(page.WorkspacePage)
 		case key.Matches(msg, keys.Help):
 			if a.showQuit {
 				return a, nil
@@ -656,6 +826,15 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if a.showSetupWizard {
+		d, setupCmd := a.setupWizard.Update(msg)
+		a.setupWizard = d.(dialog.SetupWizardDialog)
+		cmds = append(cmds, setupCmd)
+		if _, ok := msg.(tea.KeyMsg); ok {
+			return a, tea.Batch(cmds...)
+		}
+	}
+
 	s, _ := a.status.Update(msg)
 	a.status = s.(core.StatusCmp)
 	a.pages[a.currentPage], cmd = a.pages[a.currentPage].Update(msg)
@@ -675,6 +854,155 @@ func (a *appModel) findCommand(id string) (dialog.Command, bool) {
 		}
 	}
 	return dialog.Command{}, false
+}
+
+func (a *appModel) filterCommandsByIDs(ids ...string) []dialog.Command {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	allowed := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		allowed[id] = struct{}{}
+	}
+
+	filtered := make([]dialog.Command, 0, len(ids))
+	for _, cmd := range a.commands {
+		if _, ok := allowed[cmd.ID]; ok {
+			filtered = append(filtered, cmd)
+		}
+	}
+	return filtered
+}
+
+func (a appModel) handleBuiltInArgumentCommand(msg dialog.CloseMultiArgumentsDialogMsg) (tea.Cmd, bool) {
+	switch msg.CommandID {
+	case commandSetTemperature:
+		value, err := parseOptionalFloatArg(msg.Args["VALUE"])
+		if err != nil {
+			return util.ReportWarn("Invalid temperature. Use a number between 0 and 2, or empty to clear."), true
+		}
+		if err := config.UpdateAgentTemperature(config.AgentCoder, value); err != nil {
+			return util.ReportError(err), true
+		}
+		return util.ReportInfo("Updated coder temperature"), true
+	case commandSetTopK:
+		value, err := parseOptionalIntArg(msg.Args["VALUE"])
+		if err != nil {
+			return util.ReportWarn("Invalid top_k. Use a non-negative integer, or empty to clear."), true
+		}
+		if err := config.UpdateAgentTopK(config.AgentCoder, value); err != nil {
+			return util.ReportError(err), true
+		}
+		return util.ReportInfo("Updated coder top_k"), true
+	case commandSetNumCtx:
+		value, err := parseOptionalIntArg(msg.Args["VALUE"])
+		if err != nil {
+			return util.ReportWarn("Invalid context window size. Use a positive integer, or empty to clear."), true
+		}
+		if err := config.UpdateAgentNumCtx(config.AgentCoder, value); err != nil {
+			return util.ReportError(err), true
+		}
+		return util.ReportInfo("Updated coder context window size"), true
+	case commandSetMinP:
+		value, err := parseOptionalFloatArg(msg.Args["VALUE"])
+		if err != nil {
+			return util.ReportWarn("Invalid min_p. Use a number between 0 and 1, or empty to clear."), true
+		}
+		if err := config.UpdateAgentMinP(config.AgentCoder, value); err != nil {
+			return util.ReportError(err), true
+		}
+		return util.ReportInfo("Updated coder min_p"), true
+	case commandSetRepeat:
+		value, err := parseOptionalFloatArg(msg.Args["VALUE"])
+		if err != nil {
+			return util.ReportWarn("Invalid repeat penalty. Use a non-negative number, or empty to clear."), true
+		}
+		if err := config.UpdateAgentRepeatPenalty(config.AgentCoder, value); err != nil {
+			return util.ReportError(err), true
+		}
+		return util.ReportInfo("Updated coder repeat penalty"), true
+	case commandSetSystem:
+		if err := writeWorkspacePromptFile("system.md", msg.Args["PROMPT"]); err != nil {
+			return util.ReportError(err), true
+		}
+		return util.ReportInfo("Updated workspace system prompt"), true
+	case commandSetSkills:
+		if err := writeWorkspacePromptFile("skills.md", msg.Args["PROMPT"]); err != nil {
+			return util.ReportError(err), true
+		}
+		return util.ReportInfo("Updated workspace skills prompt"), true
+	case commandSetAgentPrompt:
+		agentName := strings.ToLower(strings.TrimSpace(msg.Args["AGENT"]))
+		if agentName == "" {
+			return util.ReportWarn("Agent is required. Use coder, task, summarizer, or title."), true
+		}
+		if agentName != string(config.AgentCoder) && agentName != string(config.AgentTask) && agentName != string(config.AgentSummarizer) && agentName != string(config.AgentTitle) {
+			return util.ReportWarn("Unknown agent. Use coder, task, summarizer, or title."), true
+		}
+		rel := filepath.Join("agents", agentName+".md")
+		if err := writeWorkspacePromptFile(rel, msg.Args["PROMPT"]); err != nil {
+			return util.ReportError(err), true
+		}
+		return util.ReportInfo("Updated workspace agent prompt override"), true
+	default:
+		return nil, false
+	}
+}
+
+func parseOptionalFloatArg(raw string) (*float64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+
+func parseOptionalIntArg(raw string) (*int64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+
+func writeWorkspacePromptFile(relativePath, content string) error {
+	cfg := config.Get()
+	if cfg == nil {
+		return fmt.Errorf("config not loaded")
+	}
+
+	baseDir := cfg.Data.Directory
+	if !filepath.IsAbs(baseDir) {
+		baseDir = filepath.Join(config.WorkingDirectory(), baseDir)
+	}
+
+	promptPath := filepath.Join(baseDir, "prompts", relativePath)
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		if err := os.Remove(promptPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to clear prompt file: %w", err)
+		}
+		return nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(promptPath), 0o755); err != nil {
+		return fmt.Errorf("failed to create prompt directory: %w", err)
+	}
+
+	if err := os.WriteFile(promptPath, []byte(trimmed+"\n"), 0o644); err != nil {
+		return fmt.Errorf("failed to write prompt file: %w", err)
+	}
+
+	return nil
 }
 
 func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
@@ -880,6 +1208,21 @@ func (a appModel) View() string {
 		)
 	}
 
+	if a.showSetupWizard {
+		overlay := a.setupWizard.View()
+		row := lipgloss.Height(appView) / 2
+		row -= lipgloss.Height(overlay) / 2
+		col := lipgloss.Width(appView) / 2
+		col -= lipgloss.Width(overlay) / 2
+		appView = layout.PlaceOverlay(
+			col,
+			row,
+			overlay,
+			appView,
+			true,
+		)
+	}
+
 	if a.showMultiArgumentsDialog {
 		overlay := a.multiArgumentsDialog.View()
 		row := lipgloss.Height(appView) / 2
@@ -911,27 +1254,35 @@ func New(app *app.App) tea.Model {
 		modelDialog:   dialog.NewModelDialogCmp(),
 		permissions:   dialog.NewPermissionDialogCmp(),
 		initDialog:    dialog.NewInitDialogCmp(),
+		setupWizard:   dialog.NewSetupWizardDialogCmp(),
 		themeDialog:   dialog.NewThemeDialogCmp(),
 		app:           app,
 		commands:      []dialog.Command{},
 		pages: map[page.PageID]tea.Model{
-			page.ChatPage: page.NewChatPage(app),
-			page.LogsPage: page.NewLogsPage(),
+			page.ChatPage:      page.NewChatPage(app),
+			page.LogsPage:      page.NewLogsPage(),
+			page.WorkspacePage: page.NewWorkspacePage(app),
 		},
 		filepicker: dialog.NewFilepickerCmp(app),
 	}
 
 	model.RegisterCommand(dialog.Command{
+		ID:          "setup_connection",
+		Title:       "Setup Local Connection Wizard",
+		Description: "Configure Ollama/vLLM/SGLang endpoint and local-only behavior",
+	})
+
+	model.RegisterCommand(dialog.Command{
 		ID:          "init",
 		Title:       "Initialize Project",
-		Description: "Create/Update the OpenCode.md memory file",
+		Description: "Create/Update the CrowCode.md memory file",
 		Handler: func(cmd dialog.Command) tea.Cmd {
-			prompt := `Please analyze this codebase and create a OpenCode.md file containing:
+			prompt := `Please analyze this codebase and create a CrowCode.md file containing:
 1. Build/lint/test commands - especially for running a single test
 2. Code style guidelines including imports, formatting, types, naming conventions, error handling, etc.
 
 The file you create will be given to agentic coding agents (such as yourself) that operate in this repository. Make it about 20 lines long.
-If there's already a opencode.md, improve it.
+If there's already a crowcode.md, improve it.
 If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), make sure to include them.`
 			return tea.Batch(
 				util.CmdHandler(chat.SendMsg{
@@ -949,6 +1300,96 @@ If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (
 			return func() tea.Msg {
 				return startCompactSessionMsg{}
 			}
+		},
+	})
+
+	model.RegisterCommand(dialog.Command{
+		ID:          commandSetTemperature,
+		Title:       "Set Temperature",
+		Description: "Set coder temperature (0-2, blank to clear)",
+		Handler: func(cmd dialog.Command) tea.Cmd {
+			return util.CmdHandler(dialog.ShowMultiArgumentsDialogMsg{
+				CommandID: cmd.ID,
+				ArgNames:  []string{"VALUE"},
+			})
+		},
+	})
+	model.RegisterCommand(dialog.Command{
+		ID:          commandSetTopK,
+		Title:       "Set Top-K",
+		Description: "Set coder top_k (>= 0, blank to clear)",
+		Handler: func(cmd dialog.Command) tea.Cmd {
+			return util.CmdHandler(dialog.ShowMultiArgumentsDialogMsg{
+				CommandID: cmd.ID,
+				ArgNames:  []string{"VALUE"},
+			})
+		},
+	})
+	model.RegisterCommand(dialog.Command{
+		ID:          commandSetNumCtx,
+		Title:       "Set Context Window Size",
+		Description: "Set coder num_ctx (> 0, blank to clear)",
+		Handler: func(cmd dialog.Command) tea.Cmd {
+			return util.CmdHandler(dialog.ShowMultiArgumentsDialogMsg{
+				CommandID: cmd.ID,
+				ArgNames:  []string{"VALUE"},
+			})
+		},
+	})
+	model.RegisterCommand(dialog.Command{
+		ID:          commandSetMinP,
+		Title:       "Set Min-P",
+		Description: "Set coder min_p (0-1, blank to clear)",
+		Handler: func(cmd dialog.Command) tea.Cmd {
+			return util.CmdHandler(dialog.ShowMultiArgumentsDialogMsg{
+				CommandID: cmd.ID,
+				ArgNames:  []string{"VALUE"},
+			})
+		},
+	})
+	model.RegisterCommand(dialog.Command{
+		ID:          commandSetRepeat,
+		Title:       "Set Repeat Penalty",
+		Description: "Set coder repeat penalty (>= 0, blank to clear)",
+		Handler: func(cmd dialog.Command) tea.Cmd {
+			return util.CmdHandler(dialog.ShowMultiArgumentsDialogMsg{
+				CommandID: cmd.ID,
+				ArgNames:  []string{"VALUE"},
+			})
+		},
+	})
+
+	model.RegisterCommand(dialog.Command{
+		ID:          commandSetSystem,
+		Title:       "Set Workspace System Prompt",
+		Description: "Override system prompt for this workspace (blank clears)",
+		Handler: func(cmd dialog.Command) tea.Cmd {
+			return util.CmdHandler(dialog.ShowMultiArgumentsDialogMsg{
+				CommandID: cmd.ID,
+				ArgNames:  []string{"PROMPT"},
+			})
+		},
+	})
+	model.RegisterCommand(dialog.Command{
+		ID:          commandSetSkills,
+		Title:       "Set Workspace Skills Prompt",
+		Description: "Set extra skills guidance for this workspace (blank clears)",
+		Handler: func(cmd dialog.Command) tea.Cmd {
+			return util.CmdHandler(dialog.ShowMultiArgumentsDialogMsg{
+				CommandID: cmd.ID,
+				ArgNames:  []string{"PROMPT"},
+			})
+		},
+	})
+	model.RegisterCommand(dialog.Command{
+		ID:          commandSetAgentPrompt,
+		Title:       "Set Workspace Agent Prompt",
+		Description: "Set agent override (coder/task/summarizer/title)",
+		Handler: func(cmd dialog.Command) tea.Cmd {
+			return util.CmdHandler(dialog.ShowMultiArgumentsDialogMsg{
+				CommandID: cmd.ID,
+				ArgNames:  []string{"AGENT", "PROMPT"},
+			})
 		},
 	})
 	// Load custom commands

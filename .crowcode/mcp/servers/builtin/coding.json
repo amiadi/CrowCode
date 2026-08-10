@@ -1,0 +1,10 @@
+{
+  "name": "coding",
+  "type": "stdio",
+  "command": "npx",
+  "args": [
+    "-y",
+    "@modelcontextprotocol/server-filesystem",
+    "${CROWCODE_WORKDIR}"
+  ]
+}

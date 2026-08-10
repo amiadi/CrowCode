@@ -6,3 +6,8 @@ type PageID string
 type PageChangeMsg struct {
 	ID PageID
 }
+
+type WorkspaceRunPromptMsg struct {
+	Prompt       string
+	SwitchToChat bool
+}

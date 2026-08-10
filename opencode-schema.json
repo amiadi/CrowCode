@@ -100,6 +100,43 @@
             "high"
           ],
           "type": "string"
+        },
+        "temperature": {
+          "description": "Sampling temperature for OpenAI-compatible providers",
+          "minimum": 0,
+          "maximum": 2,
+          "type": "number"
+        },
+        "topP": {
+          "description": "Top-p nucleus sampling for OpenAI-compatible providers",
+          "minimum": 0,
+          "maximum": 1,
+          "type": "number"
+        },
+        "minP": {
+          "description": "Minimum probability filter for local Ollama-compatible providers",
+          "minimum": 0,
+          "maximum": 1,
+          "type": "number"
+        },
+        "topK": {
+          "description": "Top-k sampling limit for local Ollama-compatible providers",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "numCtx": {
+          "description": "Context window override for local Ollama-compatible providers",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "repeatPenalty": {
+          "description": "Repeat penalty for local Ollama-compatible providers",
+          "minimum": 0,
+          "type": "number"
+        },
+        "seed": {
+          "description": "Random seed for deterministic OpenAI-compatible sampling",
+          "type": "integer"
         }
       },
       "required": [
@@ -108,7 +145,7 @@
       "type": "object"
     }
   },
-  "description": "Configuration schema for the OpenCode application",
+  "description": "Configuration schema for the CrowCode application",
   "properties": {
     "agents": {
       "additionalProperties": {
@@ -210,6 +247,43 @@
               "high"
             ],
             "type": "string"
+          },
+          "temperature": {
+            "description": "Sampling temperature for OpenAI-compatible providers",
+            "minimum": 0,
+            "maximum": 2,
+            "type": "number"
+          },
+          "topP": {
+            "description": "Top-p nucleus sampling for OpenAI-compatible providers",
+            "minimum": 0,
+            "maximum": 1,
+            "type": "number"
+          },
+          "minP": {
+            "description": "Minimum probability filter for local Ollama-compatible providers",
+            "minimum": 0,
+            "maximum": 1,
+            "type": "number"
+          },
+          "topK": {
+            "description": "Top-k sampling limit for local Ollama-compatible providers",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "numCtx": {
+            "description": "Context window override for local Ollama-compatible providers",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "repeatPenalty": {
+            "description": "Repeat penalty for local Ollama-compatible providers",
+            "minimum": 0,
+            "type": "number"
+          },
+          "seed": {
+            "description": "Random seed for deterministic OpenAI-compatible sampling",
+            "type": "integer"
           }
         },
         "required": [
@@ -238,10 +312,10 @@
         ".cursor/rules/",
         "CLAUDE.md",
         "CLAUDE.local.md",
-        "opencode.md",
-        "opencode.local.md",
-        "OpenCode.md",
-        "OpenCode.local.md",
+        "crowcode.md",
+        "crowcode.local.md",
+        "CrowCode.md",
+        "CrowCode.local.md",
         "OPENCODE.md",
         "OPENCODE.local.md"
       ],
@@ -255,7 +329,7 @@
       "description": "Storage configuration",
       "properties": {
         "directory": {
-          "default": ".opencode",
+          "default": ".crowcode",
           "description": "Directory where application data is stored",
           "type": "string"
         }
@@ -274,6 +348,140 @@
       "default": false,
       "description": "Enable LSP debug mode",
       "type": "boolean"
+    },
+    "localOnly": {
+      "default": false,
+      "description": "When true, disable non-local providers and force all agents to use local models",
+      "type": "boolean"
+    },
+    "localEndpoint": {
+      "description": "Base URL for local OpenAI-compatible servers (Ollama, vLLM, SGLang)",
+      "examples": [
+        "http://127.0.0.1:11434",
+        "http://192.168.1.10:8000",
+        "http://10.0.0.5:30000"
+      ],
+      "type": "string"
+    },
+    "python": {
+      "description": "Python tool runner configuration",
+      "properties": {
+        "defaultTimeoutMs": {
+          "default": 60000,
+          "description": "Default timeout for Python script tools in milliseconds",
+          "type": "integer"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Enable Python script tools",
+          "type": "boolean"
+        },
+        "interpreter": {
+          "default": "python3",
+          "description": "Python interpreter executable",
+          "type": "string"
+        },
+        "requirePermission": {
+          "default": true,
+          "description": "Require per-execution permission by default for Python tools",
+          "type": "boolean"
+        },
+        "tools": {
+          "additionalProperties": {
+            "properties": {
+              "args": {
+                "description": "Static arguments always passed to the script",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "env": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Environment variables for the script",
+                "type": "object"
+              },
+              "path": {
+                "description": "Script path (absolute or relative to working directory)",
+                "type": "string"
+              },
+              "requirePermission": {
+                "description": "Override default permission requirement for this script",
+                "type": "boolean"
+              },
+              "timeoutMs": {
+                "description": "Timeout for this script in milliseconds",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          },
+          "description": "Named Python script tools exposed to the agent",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "rag": {
+      "description": "Retrieval-augmented generation configuration",
+      "properties": {
+        "embeddings": {
+          "properties": {
+            "dimensions": {
+              "default": 768,
+              "description": "Embedding vector dimensions",
+              "type": "integer"
+            },
+            "model": {
+              "default": "nomic-embed-text",
+              "description": "Embedding model name",
+              "type": "string"
+            },
+            "provider": {
+              "default": "ollama",
+              "description": "Embedding provider (ollama, hash)",
+              "enum": [
+                "ollama",
+                "hash",
+                "local"
+              ],
+              "type": "string"
+            },
+            "timeoutMs": {
+              "default": 15000,
+              "description": "Embedding request timeout in milliseconds",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Enable chat-time RAG augmentation",
+          "type": "boolean"
+        },
+        "maxContextChars": {
+          "default": 3200,
+          "description": "Maximum characters injected from retrieved context",
+          "type": "integer"
+        },
+        "minScore": {
+          "default": 0.2,
+          "description": "Minimum hybrid score for injection",
+          "type": "number"
+        },
+        "topK": {
+          "default": 5,
+          "description": "Number of retrieval results",
+          "type": "integer"
+        }
+      },
+      "type": "object"
     },
     "lsp": {
       "additionalProperties": {
@@ -397,10 +605,10 @@
       "description": "Terminal User Interface configuration",
       "properties": {
         "theme": {
-          "default": "opencode",
+          "default": "crowcode",
           "description": "TUI theme name",
           "enum": [
-            "opencode",
+            "crowcode",
             "catppuccin",
             "dracula",
             "flexoki",
@@ -420,6 +628,6 @@
       "type": "string"
     }
   },
-  "title": "OpenCode Configuration",
+  "title": "CrowCode Configuration",
   "type": "object"
 }

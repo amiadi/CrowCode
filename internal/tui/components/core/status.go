@@ -70,18 +70,31 @@ func (m statusCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-var helpWidget = ""
-
 // getHelpWidget returns the help widget with current theme colors
 func getHelpWidget() string {
 	t := theme.CurrentTheme()
 	helpText := "ctrl+? help"
 
 	return styles.Padded().
-		Background(t.TextMuted()).
-		Foreground(t.BackgroundDarker()).
-		Bold(true).
+		Background(t.BackgroundDarker()).
+		Foreground(t.TextMuted()).
 		Render(helpText)
+}
+
+func quickActionsWidget() string {
+	t := theme.CurrentTheme()
+	badge := styles.Padded().
+		Background(t.BackgroundSecondary()).
+		Foreground(t.TextMuted())
+
+	return lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		badge.Render("ctrl+k commands"),
+		" ",
+		badge.Render("ctrl+g params"),
+		" ",
+		badge.Render("ctrl+p prompts"),
+	)
 }
 
 func formatTokensAndCost(tokens, contextWindow int64, cost float64) string {
@@ -121,8 +134,8 @@ func (m statusCmp) View() string {
 	modelID := config.Get().Agents[config.AgentCoder].Model
 	model := models.SupportedModels[modelID]
 
-	// Initialize the help widget
-	status := getHelpWidget()
+	left := lipgloss.JoinHorizontal(lipgloss.Left, getHelpWidget(), " ", quickActionsWidget())
+	status := left
 
 	tokenInfoWidth := 0
 	if m.session.ID != "" {
@@ -143,7 +156,7 @@ func (m statusCmp) View() string {
 		Background(t.BackgroundDarker()).
 		Render(m.projectDiagnostics())
 
-	availableWidht := max(0, m.width-lipgloss.Width(helpWidget)-lipgloss.Width(m.model())-lipgloss.Width(diagnostics)-tokenInfoWidth)
+	availableWidht := max(0, m.width-lipgloss.Width(left)-lipgloss.Width(m.model())-lipgloss.Width(diagnostics)-tokenInfoWidth)
 
 	if m.info.Msg != "" {
 		infoStyle := styles.Padded().
@@ -167,7 +180,7 @@ func (m statusCmp) View() string {
 		}
 		status += infoStyle.Render(msg)
 	} else {
-		status += styles.Padded().
+		status += styles.Regular().
 			Foreground(t.Text()).
 			Background(t.BackgroundSecondary()).
 			Width(availableWidht).
@@ -263,7 +276,8 @@ func (m statusCmp) availableFooterMsgWidth(diagnostics, tokenInfo string) int {
 	if m.session.ID != "" {
 		tokensWidth = lipgloss.Width(tokenInfo) + 2
 	}
-	return max(0, m.width-lipgloss.Width(helpWidget)-lipgloss.Width(m.model())-lipgloss.Width(diagnostics)-tokensWidth)
+	left := lipgloss.JoinHorizontal(lipgloss.Left, getHelpWidget(), " ", quickActionsWidget())
+	return max(0, m.width-lipgloss.Width(left)-lipgloss.Width(m.model())-lipgloss.Width(diagnostics)-tokensWidth)
 }
 
 func (m statusCmp) model() string {
@@ -284,8 +298,6 @@ func (m statusCmp) model() string {
 }
 
 func NewStatusCmp(lspClients map[string]*lsp.Client) StatusCmp {
-	helpWidget = getHelpWidget()
-
 	return &statusCmp{
 		messageTTL: 10 * time.Second,
 		lspClients: lspClients,

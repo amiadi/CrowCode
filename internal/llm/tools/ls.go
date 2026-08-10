@@ -94,13 +94,18 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 		return NewTextErrorResponse(fmt.Sprintf("error parsing parameters: %s", err)), nil
 	}
 
+	workingDir, err := lsWorkingDirectory()
+	if err != nil {
+		return NewTextErrorResponse(fmt.Sprintf("failed to resolve working directory: %s", err)), nil
+	}
+
 	searchPath := params.Path
 	if searchPath == "" {
-		searchPath = config.WorkingDirectory()
+		searchPath = workingDir
 	}
 
 	if !filepath.IsAbs(searchPath) {
-		searchPath = filepath.Join(config.WorkingDirectory(), searchPath)
+		searchPath = filepath.Join(workingDir, searchPath)
 	}
 
 	if _, err := os.Stat(searchPath); os.IsNotExist(err) {
@@ -126,6 +131,18 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 			Truncated:     truncated,
 		},
 	), nil
+}
+
+func lsWorkingDirectory() (string, error) {
+	if cfg := config.Get(); cfg != nil && cfg.WorkingDir != "" {
+		return cfg.WorkingDir, nil
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return wd, nil
 }
 
 func listDirectory(initialPath string, ignorePatterns []string, limit int) ([]string, bool, error) {

@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -18,7 +19,7 @@ import (
 
 const (
 	numVisibleModels = 10
-	maxDialogWidth   = 40
+	maxDialogWidth   = 56
 )
 
 // ModelSelectedMsg is sent when a model is selected
@@ -126,6 +127,9 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.switchProvider(1)
 			}
 		case key.Matches(msg, modelKeys.Enter):
+			if len(m.models) == 0 || m.selectedIdx < 0 || m.selectedIdx >= len(m.models) {
+				return m, util.ReportWarn("No model available for this provider")
+			}
 			util.ReportInfo(fmt.Sprintf("selected model: %s", m.models[m.selectedIdx].Name))
 			return m, util.CmdHandler(ModelSelectedMsg{Model: m.models[m.selectedIdx]})
 		case key.Matches(msg, modelKeys.Escape):
@@ -197,18 +201,35 @@ func (m *modelDialogCmp) View() string {
 		Width(maxDialogWidth).
 		Padding(0, 0, 1).
 		Render(fmt.Sprintf("Select %s Model", providerName))
+	legend := baseStyle.
+		Foreground(t.TextMuted()).
+		Width(maxDialogWidth).
+		Render("Meta: Bx=size R=reasoning A=attachments Cx=context")
 
 	// Render visible models
 	endIdx := min(m.scrollOffset+numVisibleModels, len(m.models))
 	modelItems := make([]string, 0, endIdx-m.scrollOffset)
 
 	for i := m.scrollOffset; i < endIdx; i++ {
-		itemStyle := baseStyle.Width(maxDialogWidth)
+		metaWidth := 20
+		nameWidth := maxDialogWidth - metaWidth
+		itemStyle := baseStyle
+		nameStyle := itemStyle.Width(nameWidth)
+		paramStyle := itemStyle.Width(metaWidth).Align(lipgloss.Right).Foreground(t.TextMuted())
 		if i == m.selectedIdx {
 			itemStyle = itemStyle.Background(t.Primary()).
 				Foreground(t.Background()).Bold(true)
+			nameStyle = itemStyle.Width(nameWidth)
+			paramStyle = itemStyle.Width(metaWidth).Align(lipgloss.Right)
 		}
-		modelItems = append(modelItems, itemStyle.Render(m.models[i].Name))
+
+		modelName := truncateWithEllipsis(m.models[i].Name, nameWidth)
+		parameter := modelRowMeta(m.models[i])
+		modelItems = append(modelItems, lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			nameStyle.Render(modelName),
+			paramStyle.Render(parameter),
+		))
 	}
 
 	scrollIndicator := m.getScrollIndicators(maxDialogWidth)
@@ -216,7 +237,9 @@ func (m *modelDialogCmp) View() string {
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		title,
+		legend,
 		baseStyle.Width(maxDialogWidth).Render(lipgloss.JoinVertical(lipgloss.Left, modelItems...)),
+		m.selectedModelDetails(maxDialogWidth),
 		scrollIndicator,
 	)
 
@@ -370,4 +393,123 @@ func getModelsForProvider(provider models.ModelProvider) []models.Model {
 
 func NewModelDialogCmp() ModelDialog {
 	return &modelDialogCmp{}
+}
+
+func (m *modelDialogCmp) selectedModelDetails(maxWidth int) string {
+	if len(m.models) == 0 || m.selectedIdx < 0 || m.selectedIdx >= len(m.models) {
+		return ""
+	}
+
+	selected := m.models[m.selectedIdx]
+	features := modelFeatureBadges(selected)
+	if len(features) == 0 {
+		return ""
+	}
+
+	t := theme.CurrentTheme()
+	baseStyle := styles.BaseStyle()
+	return baseStyle.
+		Foreground(t.TextMuted()).
+		Width(maxWidth).
+		Padding(1, 0, 0).
+		Render("Features: " + strings.Join(features, " | "))
+}
+
+var modelParamPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(\d+(?:\.\d+)?)b(?:[^a-z0-9]|$)`),
+	regexp.MustCompile(`(?i)(?:^|[^a-z0-9])b(\d+(?:\.\d+)?)(?:[^a-z0-9]|$)`),
+}
+
+func displayModelParameter(model models.Model) string {
+	candidates := []string{model.APIModel, string(model.ID), model.Name}
+	for _, candidate := range candidates {
+		for _, pattern := range modelParamPatterns {
+			match := pattern.FindStringSubmatch(strings.ToLower(candidate))
+			if len(match) > 1 {
+				return "B" + trimNumericLabel(match[1])
+			}
+		}
+	}
+	return "-"
+}
+
+func trimNumericLabel(raw string) string {
+	v := strings.TrimSpace(raw)
+	v = strings.TrimRight(v, "0")
+	v = strings.TrimRight(v, ".")
+	if v == "" {
+		return raw
+	}
+	return v
+}
+
+func truncateWithEllipsis(value string, width int) string {
+	if width <= 1 {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) <= width {
+		return value
+	}
+	return string(runes[:width-1]) + "…"
+}
+
+func modelFeatureBadges(model models.Model) []string {
+	badges := make([]string, 0, 6)
+	if param := displayModelParameter(model); param != "-" {
+		badges = append(badges, param)
+	}
+	if model.CanReason {
+		badges = append(badges, "Reasoning")
+	}
+	if model.SupportsAttachments {
+		badges = append(badges, "Attachments")
+	}
+	if model.ContextWindow > 0 {
+		badges = append(badges, "Ctx "+formatTokenCount(model.ContextWindow))
+	}
+	if model.DefaultMaxTokens > 0 {
+		badges = append(badges, "Max "+formatTokenCount(model.DefaultMaxTokens))
+	}
+	return badges
+}
+
+func formatTokenCount(value int64) string {
+	if value >= 1_000_000 {
+		return fmt.Sprintf("%.1fM", float64(value)/1_000_000)
+	}
+	if value >= 1_000 {
+		return fmt.Sprintf("%.0fK", float64(value)/1_000)
+	}
+	return fmt.Sprintf("%d", value)
+}
+
+func compactTokenCount(value int64) string {
+	if value >= 1_000_000 {
+		return fmt.Sprintf("%.1fM", float64(value)/1_000_000)
+	}
+	if value >= 1_000 {
+		return fmt.Sprintf("%.0fK", float64(value)/1_000)
+	}
+	return fmt.Sprintf("%d", value)
+}
+
+func modelRowMeta(model models.Model) string {
+	parts := make([]string, 0, 5)
+	if param := displayModelParameter(model); param != "-" {
+		parts = append(parts, param)
+	}
+	if model.CanReason {
+		parts = append(parts, "R")
+	}
+	if model.SupportsAttachments {
+		parts = append(parts, "A")
+	}
+	if model.ContextWindow > 0 {
+		parts = append(parts, "C"+compactTokenCount(model.ContextWindow))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " ")
 }

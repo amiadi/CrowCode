@@ -4,15 +4,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// OpenCodeTheme implements the Theme interface with OpenCode brand colors.
+// CrowCodeTheme implements the Theme interface with CrowCode brand colors.
 // It provides both dark and light variants.
-type OpenCodeTheme struct {
+type CrowCodeTheme struct {
 	BaseTheme
 }
 
-// NewOpenCodeTheme creates a new instance of the OpenCode theme.
-func NewOpenCodeTheme() *OpenCodeTheme {
-	// OpenCode color palette
+// NewCrowCodeTheme creates a new instance of the CrowCode theme.
+func NewCrowCodeTheme() *CrowCodeTheme {
+	// CrowCode color palette
 	// Dark mode colors
 	darkBackground := "#212121"
 	darkCurrentLine := "#252525"
@@ -45,7 +45,7 @@ func NewOpenCodeTheme() *OpenCodeTheme {
 	lightYellow := "#b0851f"    // Emphasized text
 	lightBorder := "#d3d3d3"    // Border color
 
-	theme := &OpenCodeTheme{}
+	theme := &CrowCodeTheme{}
 
 	// Base colors
 	theme.PrimaryColor = lipgloss.AdaptiveColor{
@@ -271,7 +271,6 @@ func NewOpenCodeTheme() *OpenCodeTheme {
 }
 
 func init() {
-	// Register the OpenCode theme with the theme manager
-	RegisterTheme("opencode", NewOpenCodeTheme())
+	// Register the CrowCode theme with the theme manager
+	RegisterTheme("crowcode", NewCrowCodeTheme())
 }
-

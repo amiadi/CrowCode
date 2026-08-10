@@ -46,11 +46,20 @@ func toMarkdown(content string, focused bool, width int) string {
 
 func renderMessage(msg string, isUser bool, isFocused bool, width int, info ...string) string {
 	t := theme.CurrentTheme()
+	// Reserve room for border and horizontal padding to prevent clipping.
+	frameWidth := max(1, width-3)
+	markdownWidth := max(1, frameWidth-2)
+	messageBg := t.BackgroundSecondary()
+	if isUser {
+		messageBg = t.BackgroundDarker()
+	}
 
 	style := styles.BaseStyle().
-		Width(width - 1).
+		Width(frameWidth).
+		Padding(0, 1).
+		Background(messageBg).
 		BorderLeft(true).
-		Foreground(t.TextMuted()).
+		Foreground(t.Text()).
 		BorderForeground(t.Primary()).
 		BorderStyle(lipgloss.ThickBorder())
 
@@ -59,9 +68,12 @@ func renderMessage(msg string, isUser bool, isFocused bool, width int, info ...s
 	}
 
 	// Apply markdown formatting and handle background color
-	parts := []string{
-		styles.ForceReplaceBackgroundWithLipgloss(toMarkdown(msg, isFocused, width), t.Background()),
+	markdown := toMarkdown(msg, isFocused, markdownWidth)
+	if strings.TrimSpace(ansi.Strip(markdown)) == "" {
+		// Fallback to plain text so responses never disappear due to renderer issues.
+		markdown = msg
 	}
+	parts := []string{markdown}
 
 	// Remove newline at the end
 	parts[0] = strings.TrimSuffix(parts[0], "\n")
@@ -241,6 +253,9 @@ func toolName(name string) string {
 	case tools.PatchToolName:
 		return "Patch"
 	}
+	if strings.HasPrefix(name, "python.") {
+		return "Python"
+	}
 	return name
 }
 
@@ -268,6 +283,9 @@ func getToolAction(name string) string {
 		return "Preparing write..."
 	case tools.PatchToolName:
 		return "Preparing patch..."
+	}
+	if strings.HasPrefix(name, "python.") {
+		return "Running Python tool..."
 	}
 	return "Working..."
 }

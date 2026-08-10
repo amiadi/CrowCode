@@ -22,29 +22,29 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "opencode",
+	Use:   "crowcode",
 	Short: "Terminal-based AI assistant for software development",
-	Long: `OpenCode is a powerful terminal-based AI assistant that helps with software development tasks.
+	Long: `CrowCode is a powerful terminal-based AI assistant that helps with software development tasks.
 It provides an interactive chat interface with AI capabilities, code analysis, and LSP integration
 to assist developers in writing, debugging, and understanding code directly from the terminal.`,
 	Example: `
   # Run in interactive mode
-  opencode
+	crowcode
 
   # Run with debug logging
-  opencode -d
+	crowcode -d
 
   # Run with debug logging in a specific directory
-  opencode -d -c /path/to/project
+	crowcode -d -c /path/to/project
 
   # Print version
-  opencode -v
+	crowcode -v
 
   # Run a single non-interactive prompt
-  opencode -p "Explain the use of context in Go"
+	crowcode -p "Explain the use of context in Go"
 
   # Run a single non-interactive prompt with JSON output format
-  opencode -p "Explain the use of context in Go" -f json
+	crowcode -p "Explain the use of context in Go" -f json
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// If the help flag is set, show the help message
@@ -53,7 +53,7 @@ to assist developers in writing, debugging, and understanding code directly from
 			return nil
 		}
 		if cmd.Flag("version").Changed {
-			fmt.Println(version.Version)
+			fmt.Printf("CrowCode %s\n", version.Version)
 			return nil
 		}
 

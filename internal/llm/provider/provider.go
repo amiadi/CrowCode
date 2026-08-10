@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/llm/models"
 	"github.com/opencode-ai/opencode/internal/llm/tools"
 	"github.com/opencode-ai/opencode/internal/message"
@@ -153,8 +155,13 @@ func NewProvider(providerName models.ModelProvider, opts ...ProviderClientOption
 			client:  newOpenAIClient(clientOptions),
 		}, nil
 	case models.ProviderLocal:
+		endpoint := os.Getenv("LOCAL_ENDPOINT")
+		if cfg := config.Get(); cfg != nil && strings.TrimSpace(cfg.LocalEndpoint) != "" {
+			endpoint = cfg.LocalEndpoint
+		}
+		endpoint = normalizeLocalOpenAIBaseURL(endpoint)
 		clientOptions.openaiOptions = append(clientOptions.openaiOptions,
-			WithOpenAIBaseURL(os.Getenv("LOCAL_ENDPOINT")),
+			WithOpenAIBaseURL(endpoint),
 		)
 		return &baseProvider[OpenAIClient]{
 			options: clientOptions,
@@ -165,6 +172,21 @@ func NewProvider(providerName models.ModelProvider, opts ...ProviderClientOption
 		panic("not implemented")
 	}
 	return nil, fmt.Errorf("provider not supported: %s", providerName)
+}
+
+func normalizeLocalOpenAIBaseURL(endpoint string) string {
+	base := strings.TrimSpace(endpoint)
+	base = strings.TrimSuffix(base, "/")
+	if base == "" {
+		return ""
+	}
+
+	lower := strings.ToLower(base)
+	if strings.HasSuffix(lower, "/v1") || strings.HasSuffix(lower, "/openai/v1") || strings.HasSuffix(lower, "/api/v1") {
+		return base
+	}
+
+	return base + "/v1"
 }
 
 func (p *baseProvider[C]) cleanMessages(messages []message.Message) (cleaned []message.Message) {

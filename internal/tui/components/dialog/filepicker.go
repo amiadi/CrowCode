@@ -164,6 +164,10 @@ func (f *filepickerCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				isPathDir = fileInfo.IsDir()
 			} else {
+				if !f.hasValidSelection() {
+					logging.ErrorPersist("No selectable file or directory in current view")
+					return f, cmd
+				}
 				path = filepath.Join(f.cwdDetails.directory, "/", f.dirs[f.cursor].Name())
 				isPathDir = f.dirs[f.cursor].IsDir()
 			}
@@ -189,6 +193,10 @@ func (f *filepickerCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, filePickerKeyMap.Forward):
 			if !f.cwd.Focused() {
+				if !f.hasValidSelection() {
+					logging.ErrorPersist("No selectable directory in current view")
+					return f, cmd
+				}
 				if f.dirs[f.cursor].IsDir() {
 					path := filepath.Join(f.cwdDetails.directory, "/", f.dirs[f.cursor].Name())
 					newWorkingDir := DirNode{parent: f.cwdDetails, directory: path}
@@ -364,6 +372,13 @@ func (f *filepickerCmp) ToggleFilepicker(showFilepicker bool) {
 
 func (f *filepickerCmp) IsCWDFocused() bool {
 	return f.cwd.Focused()
+}
+
+func (f *filepickerCmp) hasValidSelection() bool {
+	if len(f.dirs) == 0 {
+		return false
+	}
+	return f.cursor >= 0 && f.cursor < len(f.dirs)
 }
 
 func NewFilepickerCmp(app *app.App) FilepickerCmp {

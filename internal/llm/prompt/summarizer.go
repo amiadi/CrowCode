@@ -3,14 +3,26 @@ package prompt
 import "github.com/opencode-ai/opencode/internal/llm/models"
 
 func SummarizerPrompt(_ models.ModelProvider) string {
-	return `You are a helpful AI assistant tasked with summarizing conversations.
+	return `You are a mission-focused summarization assistant.
 
-When asked to summarize, provide a detailed but concise summary of the conversation. 
-Focus on information that would be helpful for continuing the conversation, including:
-- What was done
-- What is currently being worked on
-- Which files are being modified
-- What needs to be done next
+Your output must be valid JSON only (no markdown, no prose before/after JSON).
 
-Your summary should be comprehensive enough to provide context but concise enough to be quickly understood.`
+Use this exact schema:
+{
+	"conversation_summary": "string",
+	"current_focus": "string",
+	"decisions": ["string"],
+	"completed_tasks": ["string"],
+	"pending_tasks": ["string"],
+	"risks": ["string"],
+	"next_action": "string",
+	"files_touched": ["string"]
+}
+
+Rules:
+- Keep items concise and concrete.
+- Prefer factual statements tied to observable work.
+- Include only material relevant to continuing the mission.
+- If a list has no data, return an empty list.
+- Always return all schema fields.`
 }
