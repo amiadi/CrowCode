@@ -1,6 +1,6 @@
 # Binaries for programs and plugins
-*.exe
-*.exe~
+# *.exe
+# *.exe~
 *.dll
 *.so
 *.dylib
@@ -35,7 +35,7 @@ Thumbs.db
 
 # Binary output directory
 /bin/
-/dist/
+# /dist/
 
 # Local environment variables
 .env
