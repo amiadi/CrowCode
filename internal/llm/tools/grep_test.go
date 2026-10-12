@@ -32,4 +32,14 @@ func TestSearchWithBundledRipgrep(t *testing.T) {
 	if err != nil || len(matches) != 0 {
 		t.Fatalf("no-match result: %+v, %v", matches, err)
 	}
+	if runtime.GOOS == "linux" {
+		path = filepath.Join(dir, "invalid-\xff.txt")
+		if err := os.WriteFile(path, []byte("byte-needle: \xff\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		matches, err = searchWithRipgrep("byte-needle", dir, "*.txt")
+		if err != nil || len(matches) != 1 || matches[0].path != path || matches[0].lineText != "byte-needle: \xff" {
+			t.Fatalf("non-UTF-8 match: %+v, %v", matches, err)
+		}
+	}
 }

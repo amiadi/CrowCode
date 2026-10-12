@@ -238,10 +238,12 @@ func searchWithRipgrep(pattern, path, include string) ([]grepMatch, error) {
 			Type string `json:"type"`
 			Data struct {
 				Path struct {
-					Text string `json:"text"`
+					Text  string `json:"text"`
+					Bytes []byte `json:"bytes"`
 				} `json:"path"`
 				Lines struct {
-					Text string `json:"text"`
+					Text  string `json:"text"`
+					Bytes []byte `json:"bytes"`
 				} `json:"lines"`
 				LineNumber int `json:"line_number"`
 			} `json:"data"`
@@ -254,8 +256,15 @@ func searchWithRipgrep(pattern, path, include string) ([]grepMatch, error) {
 		}
 
 		filePath := event.Data.Path.Text
+		if event.Data.Path.Bytes != nil {
+			filePath = string(event.Data.Path.Bytes)
+		}
 		lineNum := event.Data.LineNumber
-		lineText := strings.TrimRight(event.Data.Lines.Text, "\r\n")
+		lineText := event.Data.Lines.Text
+		if event.Data.Lines.Bytes != nil {
+			lineText = string(event.Data.Lines.Bytes)
+		}
+		lineText = strings.TrimRight(lineText, "\r\n")
 
 		fileInfo, err := os.Stat(filePath)
 		if err != nil {

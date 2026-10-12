@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 
@@ -18,13 +19,19 @@ func newToolCommand(name, description string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path, err := bundledtools.LookPath(name)
 			if err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Unable to find %s: %v\n", name, err)
 				return err
 			}
 			process := exec.CommandContext(cmd.Context(), path, args...)
 			process.Stdin = cmd.InOrStdin()
 			process.Stdout = cmd.OutOrStdout()
 			process.Stderr = cmd.ErrOrStderr()
-			return process.Run()
+			err = process.Run()
+			var exitErr *exec.ExitError
+			if err != nil && !errors.As(err, &exitErr) {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Unable to run %s: %v\n", name, err)
+			}
+			return err
 		},
 	}
 }

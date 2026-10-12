@@ -189,6 +189,11 @@ curl -fsSL https://raw.githubusercontent.com/crowcode-ai/crowcode/main/install |
 
 ### Offline Install (Linux and Windows)
 
+The single-file Linux/Windows x86_64 executables in `dist/` embed ripgrep and
+fzf; neither tool needs a separate installation. See the
+[binary installation and usage guide](dist/README.md) for deployment,
+configuration, flags, bundled-tool commands, and troubleshooting.
+
 Linux:
 
 ```bash
