@@ -27,6 +27,8 @@ You can also run the embedded tools directly with `crowcode rg ...` and
 `crowcode fzf ...`. Their native flags, standard input/output, and normal exit
 codes are preserved. Shell completions and fzf shell key bindings are **not**
 installed. `crowcode licenses` prints the embedded license notices.
+Interrupt/termination signals during a direct tool command cancel and wait for
+the subprocess, clean up the extracted tools, and exit with code `130`.
 
 ## 2. Requirements and verification
 

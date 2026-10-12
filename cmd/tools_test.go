@@ -2,12 +2,30 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestToolCommandCancellation(t *testing.T) {
+	if runtime.GOARCH != "amd64" || (runtime.GOOS != "linux" && runtime.GOOS != "windows") {
+		t.Skip("platform has no bundled tools")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	command := newToolCommand("rg", "test")
+	command.SetContext(ctx)
+	command.SetArgs([]string{"--version"})
+	var output bytes.Buffer
+	command.SetOut(&output)
+	command.SetErr(&output)
+	if err := command.Execute(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+}
 
 func TestToolCommands(t *testing.T) {
 	if runtime.GOARCH != "amd64" || (runtime.GOOS != "linux" && runtime.GOOS != "windows") {

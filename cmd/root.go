@@ -293,6 +293,9 @@ func Execute() {
 	err := rootCmd.Execute()
 	bundledtools.Cleanup()
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			os.Exit(130)
+		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() > 0 {
 			os.Exit(exitErr.ExitCode())

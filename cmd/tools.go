@@ -3,7 +3,12 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"os/signal"
+	"runtime"
+	"syscall"
+	"time"
 
 	"github.com/opencode-ai/opencode/internal/bundledtools"
 	"github.com/spf13/cobra"
@@ -22,11 +27,23 @@ func newToolCommand(name, description string) *cobra.Command {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Unable to find %s: %v\n", name, err)
 				return err
 			}
-			process := exec.CommandContext(cmd.Context(), path, args...)
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			process := exec.CommandContext(ctx, path, args...)
+			process.Cancel = func() error {
+				if runtime.GOOS == "windows" {
+					return process.Process.Kill()
+				}
+				return process.Process.Signal(os.Interrupt)
+			}
+			process.WaitDelay = 2 * time.Second
 			process.Stdin = cmd.InOrStdin()
 			process.Stdout = cmd.OutOrStdout()
 			process.Stderr = cmd.ErrOrStderr()
 			err = process.Run()
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			var exitErr *exec.ExitError
 			if err != nil && !errors.As(err, &exitErr) {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Unable to run %s: %v\n", name, err)
