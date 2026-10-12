@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/opencode-ai/opencode/internal/bundledtools"
 	"github.com/opencode-ai/opencode/internal/logging"
 )
 
@@ -21,12 +22,12 @@ var (
 
 func init() {
 	var err error
-	rgPath, err = exec.LookPath("rg")
+	rgPath, err = bundledtools.LookPath("rg")
 	if err != nil {
 		logging.Warn("Ripgrep (rg) not found in $PATH. Some features might be limited or slower.")
 		rgPath = ""
 	}
-	fzfPath, err = exec.LookPath("fzf")
+	fzfPath, err = bundledtools.LookPath("fzf")
 	if err != nil {
 		logging.Warn("FZF not found in $PATH. Some features might be limited or slower.")
 		fzfPath = ""

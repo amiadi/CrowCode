@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/opencode-ai/opencode/internal/bundledtools"
 	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/fileutil"
 )
@@ -205,19 +205,19 @@ func searchFiles(pattern, rootPath, include string, limit int) ([]grepMatch, boo
 }
 
 func searchWithRipgrep(pattern, path, include string) ([]grepMatch, error) {
-	_, err := exec.LookPath("rg")
+	rgPath, err := bundledtools.LookPath("rg")
 	if err != nil {
 		return nil, fmt.Errorf("ripgrep not found: %w", err)
 	}
 
-	// Use -n to show line numbers and include the matched line
-	args := []string{"-H", "-n", pattern}
+	// JSON keeps Windows drive letters and colons in filenames unambiguous.
+	args := []string{"--json", "-e", pattern}
 	if include != "" {
 		args = append(args, "--glob", include)
 	}
 	args = append(args, path)
 
-	cmd := exec.Command("rg", args...)
+	cmd := exec.Command(rgPath, args...)
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
@@ -234,18 +234,28 @@ func searchWithRipgrep(pattern, path, include string) ([]grepMatch, error) {
 			continue
 		}
 
-		// Parse ripgrep output format: file:line:content
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) < 3 {
+		var event struct {
+			Type string `json:"type"`
+			Data struct {
+				Path struct {
+					Text string `json:"text"`
+				} `json:"path"`
+				Lines struct {
+					Text string `json:"text"`
+				} `json:"lines"`
+				LineNumber int `json:"line_number"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			return nil, fmt.Errorf("parse ripgrep output: %w", err)
+		}
+		if event.Type != "match" {
 			continue
 		}
 
-		filePath := parts[0]
-		lineNum, err := strconv.Atoi(parts[1])
-		if err != nil {
-			continue
-		}
-		lineText := parts[2]
+		filePath := event.Data.Path.Text
+		lineNum := event.Data.LineNumber
+		lineText := strings.TrimRight(event.Data.Lines.Text, "\r\n")
 
 		fileInfo, err := os.Stat(filePath)
 		if err != nil {

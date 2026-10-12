@@ -2,14 +2,17 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 	"github.com/opencode-ai/opencode/internal/app"
+	"github.com/opencode-ai/opencode/internal/bundledtools"
 	"github.com/opencode-ai/opencode/internal/config"
 	"github.com/opencode-ai/opencode/internal/db"
 	"github.com/opencode-ai/opencode/internal/format"
@@ -282,8 +285,18 @@ func setupSubscriptions(app *app.App, parentCtx context.Context) (chan tea.Msg, 
 }
 
 func Execute() {
+	if err := bundledtools.Initialize(); err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to extract bundled tools (check your temporary directory): %v\n", err)
+		bundledtools.Cleanup()
+		os.Exit(1)
+	}
 	err := rootCmd.Execute()
+	bundledtools.Cleanup()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() > 0 {
+			os.Exit(exitErr.ExitCode())
+		}
 		os.Exit(1)
 	}
 }
