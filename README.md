@@ -35,15 +35,21 @@ CrowCode is a Go-based CLI application that brings AI assistance to your termina
 ## Features
 
 - **Interactive TUI**: Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) for a smooth terminal experience
-- **Multiple AI Providers**: Support for OpenAI, Anthropic Claude, Google Gemini, AWS Bedrock, Groq, Azure OpenAI, and OpenRouter
+- **Multiple AI Providers**: Support for OpenAI, Anthropic Claude, Google Gemini, AWS Bedrock, Groq, Azure OpenAI, OpenRouter, xAI, GitHub Copilot, and self-hosted OpenAI-compatible endpoints
 - **Session Management**: Save and manage multiple conversation sessions
+- **Session Summaries and Auto-Compaction**: Summarize long conversations and retain structured task state so work can continue with context
 - **Tool Integration**: AI can execute commands, search files, and modify code
+- **MCP Integration**: Use built-in profiles and automatically discover MCP servers from manifests or local binaries
+- **SQLite-backed RAG**: Index and search local files, web pages, SQL results, object storage, folders, and remote shares; optionally add retrieved context to chat
+- **Local Model Setup**: Configure Ollama, vLLM, or SGLang endpoints with a guided wizard, local-only mode, and per-agent model parameters
+- **Python Script Tools**: Expose configured scripts to the assistant with execution timeouts and permission checks
+- **Non-interactive CLI**: Run prompts from scripts and choose plain-text or JSON output
 - **Vim-like Editor**: Integrated editor with text input capabilities
 - **Persistent Storage**: SQLite database for storing conversations and sessions
 - **LSP Integration**: Language Server Protocol support for code intelligence
 - **File Change Tracking**: Track and visualize file changes during sessions
 - **External Editor Support**: Open your preferred editor for composing messages
-- **Named Arguments for Custom Commands**: Create powerful custom commands with multiple named placeholders
+- **Prompt and Command Customization**: Add workspace prompt overrides and custom commands with named arguments
 
 ## RAG Connector Quickstart
 
@@ -107,16 +113,30 @@ For complete onboarding and advanced usage, use the project documentation book:
 CrowCode ships with built-in MCP profiles and supports auto-discovery for user-installed MCP servers.
 
 Built-in profiles available out of the box:
+- `caveman`
+- `coding`
+- `reverse_engineering`
 
 CrowCode auto-loads MCP servers from:
+- `<data.directory>/mcp/servers/builtin`
+- `$XDG_CONFIG_HOME/crowcode/mcp/servers`
+- `$HOME/.crowcode/mcp/servers`
+- `<workspace>/.crowcode/mcp/servers`
 
 ### Offline local binary discovery (no JSON manifests required)
 
 Users can drop pre-downloaded MCP server binaries directly into discovery folders and CrowCode will auto-register them as `stdio` MCP servers.
 
 Binary discovery folders:
+- `<data.directory>/mcp/bin`
+- `$XDG_CONFIG_HOME/crowcode/mcp/bin`
+- `$HOME/.crowcode/mcp/bin`
+- `<workspace>/.crowcode/mcp/bin`
 
 Compatibility folders also scanned for binaries:
+- `$XDG_CONFIG_HOME/crowcode/mcp/servers`
+- `$HOME/.crowcode/mcp/servers`
+- `<workspace>/.crowcode/mcp/servers`
 
 Example (offline binary drop-in):
 
@@ -130,6 +150,7 @@ crowcode
 The server is auto-registered with a normalized name derived from the file name (for example `my-mcp-server` -> `my_mcp_server`).
 
 Priority behavior:
+- Explicit `mcpServers` configuration overrides manifest discovery; manifest discovery overrides binary discovery for matching names.
 
 Inspect effective MCP servers and their source:
 
@@ -488,6 +509,18 @@ CrowCode supports a variety of AI models from different providers:
 
 - Gemini 2.5
 - Gemini 2.5 Flash
+
+### OpenRouter
+
+- Routes supported OpenAI, Anthropic, and Gemini model families through OpenRouter
+- Includes DeepSeek R1 Free
+
+### xAI
+
+- Grok 3 Beta
+- Grok 3 Mini Beta
+- Grok 3 Fast Beta
+- Grok 3 Mini Fast Beta
 
 ## Usage
 
